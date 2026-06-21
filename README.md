@@ -47,7 +47,7 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
 
 ## Install
 
-### From the `stable` branch — prebuilt, no toolchain
+### One-line install — prebuilt, no toolchain
 
 The `stable` branch ships prebuilt binaries in [`dist/`](dist) (published by CI),
 so you can install without Rust. Prebuilts are provided for **Linux x86_64**,
@@ -56,16 +56,41 @@ to a source build. Linux prebuilts are built with musl so they do not require a
 specific host glibc version.
 
 ```bash
-git clone --branch stable --depth 1 git@github.com:vothanhdat/tmux-palette-rs.git ~/Sites/tmux-palette
-cd ~/Sites/tmux-palette
-./install.sh                     # copies the right binary to ~/.local/bin/tmux-palette
-# or: ./install.sh /usr/local/bin/tmux-palette
+curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/stable/install.sh | sh
+```
+
+Install somewhere else:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/stable/install.sh | sh -s -- --dest /usr/local/bin/tmux-palette
 ```
 
 Then bind it (the installer prints this line for you):
 
 ```tmux
 bind -n C-Space run-shell "~/.local/bin/tmux-palette"
+```
+
+Reload tmux:
+
+```bash
+tmux source-file ~/.tmux.conf
+```
+
+You can also download the installer first and inspect its options:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/stable/install.sh
+sh install.sh --help
+```
+
+### From a checkout
+
+```bash
+git clone --branch stable --depth 1 git@github.com:vothanhdat/tmux-palette-rs.git ~/Sites/tmux-palette
+cd ~/Sites/tmux-palette
+./install.sh                     # copies the right binary to ~/.local/bin/tmux-palette
+# or: ./install.sh /usr/local/bin/tmux-palette
 ```
 
 The prebuilt binary is also usable directly without the installer, e.g.
