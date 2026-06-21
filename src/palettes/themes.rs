@@ -9,7 +9,7 @@ use crate::theme::list_themes;
 use crate::types::{Action, Item, ItemsSource, PaletteDef, Theme};
 use crate::user_config::config_dir;
 
-const CUSTOM_THEME_DOCS: &str = "https://github.com/eduwass/tmux-palette#custom-themes";
+const CUSTOM_THEME_DOCS: &str = "https://github.com/vothanhdat/tmux-palette-rs#themes";
 
 fn save_theme(slug: &str) {
     let path = format!("{}/theme.json", config_dir());

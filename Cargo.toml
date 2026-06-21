@@ -4,7 +4,7 @@ version = "0.3.0"
 edition = "2021"
 description = "Raycast-style command palette for tmux — fast, scriptable, easy to extend (Rust port)"
 license = "MIT"
-repository = "https://github.com/eduwass/tmux-palette"
+repository = "https://github.com/vothanhdat/tmux-palette-rs"
 default-run = "tmux-palette"
 
 [[bin]]

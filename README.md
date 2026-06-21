@@ -54,7 +54,7 @@ so you can install without Rust. Prebuilts are provided for **Linux x86_64** and
 **macOS arm64 (Apple Silicon)**; other platforms fall back to a source build.
 
 ```bash
-git clone --branch stable --depth 1 <this-repo> ~/Sites/tmux-palette
+git clone --branch stable --depth 1 git@github.com:vothanhdat/tmux-palette-rs.git ~/Sites/tmux-palette
 cd ~/Sites/tmux-palette
 ./install.sh                     # copies the right binary to ~/.local/bin/tmux-palette
 # or: ./install.sh /usr/local/bin/tmux-palette
@@ -77,7 +77,7 @@ as a fallback when no prebuilt matches your platform.
 ### Manual (build from source)
 
 ```bash
-git clone <this-repo> ~/Sites/tmux-palette
+git clone git@github.com:vothanhdat/tmux-palette-rs.git ~/Sites/tmux-palette
 cd ~/Sites/tmux-palette
 cargo build --release
 # binary: ./target/release/tmux-palette
@@ -110,7 +110,7 @@ Reload: `tmux source-file ~/.tmux.conf` and hit your binding.
 Add to your `.tmux.conf`:
 
 ```tmux
-set -g @plugin '<this-repo>'
+set -g @plugin 'vothanhdat/tmux-palette-rs'
 set -g @palette-key 'C-Space'             # optional, default: C-Space (no-prefix)
 set -g @palette-find-pane-key 'M-f'       # optional, no binding by default
 set -g @palette-move-pane-key 'M-m'       # optional, no binding by default
