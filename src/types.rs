@@ -56,6 +56,9 @@ pub struct Item {
     pub data: Option<Rc<dyn Any>>,
     /// When `Some(false)`, the cursor skips this item (visual-only rows).
     pub selectable: Option<bool>,
+    /// When `true`, the item is hidden until the user types a search query
+    /// (e.g. live panes inlined into the main palette).
+    pub query_only: bool,
 }
 
 impl Default for Item {
@@ -71,6 +74,7 @@ impl Default for Item {
             action: Action::Shell(":".to_string()),
             data: None,
             selectable: None,
+            query_only: false,
         }
     }
 }

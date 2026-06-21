@@ -12,7 +12,7 @@
 use std::fs;
 use std::process::Command;
 
-use tmux_palette::cli::{apply_category, load_palette, make_loader, measure};
+use tmux_palette::cli::{apply_category, load_palette, make_loader, measure, with_inline_panes};
 use tmux_palette::palette::run_palette;
 
 fn main() {
@@ -47,6 +47,10 @@ fn run_mode(name: &str, category: Option<&str>) {
     };
     if let Some(cat) = category.filter(|c| !c.is_empty()) {
         def = apply_category(def, cat);
+    } else if name == "commands" {
+        // Inline live panes so typing searches panes without first opening the
+        // Find Pane sub-palette (only on the interactive instance).
+        def = with_inline_panes(def);
     }
     run_palette(def, Some(make_loader()), name);
 }

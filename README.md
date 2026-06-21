@@ -26,6 +26,11 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
 ## Highlights
 
 - **Fast startup** — designed for frequent use from a tmux key binding
+- **Inline pane search** — just start typing in the main palette to jump to any
+  pane across sessions/windows; live panes surface alongside commands (ranked by
+  the same fuzzy matcher) without first opening *Find Pane*. They stay hidden
+  until you type, so the resting palette is unchanged. Search matches the pane
+  title, session/window, running command, detected agent, and path.
 - **Custom palettes** — define your own with a single JSON file, bind to any key
 - **Hide built-ins** — declutter the default palette via `hidden.json`
 - **Mobile-aware** — auto-fullscreens on narrow terminals (Moshi / Blink on iOS)
@@ -167,6 +172,11 @@ cargo install --path .
 **Auto-aliases**: initials of multi-word titles match automatically. Type `nw`
 for "New Window", `cs` for "Choose Session", `sh` for "Split Horizontal".
 
+**Jump to a pane**: start typing and matching panes appear inline — by title,
+session/window, running command, agent, or path (e.g. type a project name or
+`nvim`). Pick one to switch straight to it. The dedicated **Find Pane** entry
+still opens the full session/window/pane tree.
+
 ## How it works (the trick)
 
 The binary, run with no special environment, opens a `tmux display-popup`
@@ -239,6 +249,9 @@ terminal's own colorscheme. See the bundled `terminal` theme.
   original inserted one character per keystroke event).
 - An unknown theme name in `theme.json` logs a warning and falls back to the
   default instead of aborting.
+- The main palette inlines live panes as you type, so you can jump to a pane
+  without first entering *Find Pane* (the original only exposed panes through the
+  dedicated sub-palette).
 
 ## Project layout
 
