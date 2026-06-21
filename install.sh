@@ -1,18 +1,88 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # Install a prebuilt tmux-palette binary — no Rust toolchain required.
 #
 # Usage:
 #   ./install.sh [DEST]
+#   curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/stable/install.sh | sh
 #
 # Picks the prebuilt binary for this platform. If run from a checkout of the
 # `stable` branch it uses the local dist/ binary; otherwise it downloads it
-# from the stable branch of the origin remote. DEST defaults to
-# ~/.local/bin/tmux-palette.
+# from GitHub. DEST defaults to ~/.local/bin/tmux-palette.
 
-set -euo pipefail
+set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEST="${1:-$HOME/.local/bin/tmux-palette}"
+DEFAULT_REPO="vothanhdat/tmux-palette-rs"
+DEFAULT_REF="stable"
+DEST="$HOME/.local/bin/tmux-palette"
+REPO="${TMUX_PALETTE_REPO:-}"
+REF="${TMUX_PALETTE_REF:-$DEFAULT_REF}"
+
+usage() {
+  cat <<EOF
+Install tmux-palette prebuilt binary.
+
+Usage:
+  ./install.sh [DEST]
+  ./install.sh --dest /usr/local/bin/tmux-palette
+  curl -fsSL https://raw.githubusercontent.com/$DEFAULT_REPO/$DEFAULT_REF/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/$DEFAULT_REPO/$DEFAULT_REF/install.sh | sh -s -- --dest /usr/local/bin/tmux-palette
+
+Options:
+  -d, --dest PATH     Install path (default: $HOME/.local/bin/tmux-palette)
+      --repo OWNER/REPO
+                      GitHub repo to download from (default: $DEFAULT_REPO)
+      --ref REF       Git ref/branch to download from (default: $DEFAULT_REF)
+  -h, --help          Show this help
+
+Environment:
+  TMUX_PALETTE_REPO   Same as --repo
+  TMUX_PALETTE_REF    Same as --ref
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -d|--dest)
+      if [ "$#" -lt 2 ]; then
+        echo "install.sh: $1 requires a path" >&2
+        exit 2
+      fi
+      DEST="$2"
+      shift 2
+      ;;
+    --repo)
+      if [ "$#" -lt 2 ]; then
+        echo "install.sh: --repo requires OWNER/REPO" >&2
+        exit 2
+      fi
+      REPO="$2"
+      shift 2
+      ;;
+    --ref)
+      if [ "$#" -lt 2 ]; then
+        echo "install.sh: --ref requires a git ref" >&2
+        exit 2
+      fi
+      REF="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "install.sh: unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      DEST="$1"
+      shift
+      ;;
+  esac
+done
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || pwd)"
 
 case "$(uname -s)/$(uname -m)" in
   Linux/x86_64) ASSET="tmux-palette-linux-x64" ;;
@@ -31,20 +101,23 @@ if [ -f "$SCRIPT_DIR/dist/$ASSET" ]; then
   echo "Installing $ASSET from local dist/ ..."
   cp "$SCRIPT_DIR/dist/$ASSET" "$DEST"
 else
-  # Derive owner/repo from the origin remote to download from the stable branch.
-  REMOTE="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || true)"
-  SLUG="$(printf '%s' "$REMOTE" | sed -E 's#^git@github\.com:##; s#^https://github\.com/##; s#\.git$##')"
-  if [ -z "$SLUG" ]; then
-    echo "No local dist/$ASSET and no GitHub origin remote to download from." >&2
-    echo "Clone the stable branch first:  git clone --branch stable --depth 1 <repo>" >&2
-    exit 1
+  if [ -z "$REPO" ] && command -v git >/dev/null 2>&1; then
+    REMOTE="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || true)"
+    REPO="$(printf '%s' "$REMOTE" | sed -E 's#^git@github\.com:##; s#^https://github\.com/##; s#\.git$##')"
   fi
-  URL="https://raw.githubusercontent.com/$SLUG/stable/dist/$ASSET"
+  if [ -z "$REPO" ]; then
+    REPO="$DEFAULT_REPO"
+  fi
+
+  URL="https://raw.githubusercontent.com/$REPO/$REF/dist/$ASSET"
   echo "Downloading $URL ..."
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$URL" -o "$DEST"
-  else
+  elif command -v wget >/dev/null 2>&1; then
     wget -qO "$DEST" "$URL"
+  else
+    echo "install.sh: need curl or wget to download $ASSET" >&2
+    exit 1
   fi
 fi
 
