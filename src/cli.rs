@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::palette::PaletteLoader;
 use crate::palettes::commands::commands;
-use crate::palettes::find_pane::{find_pane, inline_pane_items};
+use crate::palettes::find_pane::{find_pane, inline_pane_items, render_commands_item};
 use crate::palettes::move_pane::move_pane;
 use crate::palettes::themes::themes;
 use crate::theme::{resolve_active_theme, tmux_body_style, tmux_color};
@@ -243,6 +243,9 @@ pub fn with_inline_panes(def: PaletteDef) -> PaletteDef {
     items.extend(inline_pane_items());
     PaletteDef {
         items: ItemsSource::Static(items),
+        // Tints inline pane markers per the live theme; delegates other rows to
+        // the default renderer, so command items look exactly as before.
+        render_item: Some(Rc::new(render_commands_item)),
         ..def
     }
 }

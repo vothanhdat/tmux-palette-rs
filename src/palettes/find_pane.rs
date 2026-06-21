@@ -5,12 +5,17 @@ use std::any::Any;
 use std::rc::Rc;
 
 use crate::fuzzy::multi_fuzzy_score;
+use crate::render::{render_default_item, render_item_styled};
 use crate::tmux::{tmux, tmux_quote};
 use crate::types::{Action, Colors, Item, ItemsSource, PaletteDef, RenderItemCtx};
 
 const SPINNER: &[char] = &[
     '*', '✳', '⠂', '⠐', '⠁', '⠉', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏',
 ];
+
+/// Marker color for a pane that is active in its window (a fixed "healthy"
+/// green, theme-independent), shared by the Find Pane tree and the inline rows.
+const ACTIVE_PANE_FG: &str = "\x1b[38;2;166;227;161m";
 
 fn detect_agent(command: &str, title: &str) -> String {
     const DIRECT: &[&str] = &[
@@ -293,15 +298,23 @@ fn build_items() -> Vec<Item> {
     items
 }
 
-/// Marker glyph + optional color for a pane row rendered with the *default*
-/// item renderer (used by the inline panes in the main palette).
-fn pane_inline_icon(p: &Pane) -> (&'static str, Option<String>) {
+/// Marker state for an inline pane row, carried in `Item.data` so the main
+/// palette's renderer can tint the glyph using the live theme colors.
+#[derive(Clone, Copy)]
+struct InlinePane {
+    is_current: bool,
+    pane_active: bool,
+}
+
+/// Marker glyph for an inline pane (color is applied at render time from the
+/// theme — see [`render_commands_item`]).
+fn pane_inline_glyph(p: &Pane) -> &'static str {
     if p.is_current {
-        ("▶", None)
+        "▶"
     } else if p.pane_active {
-        ("●", Some("#a6e3a1".to_string()))
+        "●"
     } else {
-        ("○", None)
+        "○"
     }
 }
 
@@ -327,19 +340,41 @@ fn pane_inline_description(p: &Pane) -> String {
 fn panes_to_inline_items(panes: &[Pane]) -> Vec<Item> {
     panes
         .iter()
-        .map(|p| {
-            let (icon, icon_color) = pane_inline_icon(p);
-            Item {
-                icon: Some(icon.to_string()),
-                icon_color,
-                title: p.pane_title.clone(),
-                description: Some(pane_inline_description(p)),
-                action: pane_select_action(p),
-                query_only: true,
-                ..Default::default()
-            }
+        .map(|p| Item {
+            icon: Some(pane_inline_glyph(p).to_string()),
+            title: p.pane_title.clone(),
+            description: Some(pane_inline_description(p)),
+            action: pane_select_action(p),
+            query_only: true,
+            data: Some(Rc::new(InlinePane {
+                is_current: p.is_current,
+                pane_active: p.pane_active,
+            })),
+            ..Default::default()
         })
         .collect()
+}
+
+/// Renderer for the main `commands` palette: inline panes get a theme-aware
+/// marker color (current → accent, active → green, otherwise muted), matching
+/// the Find Pane tree; everything else uses the default item renderer.
+pub fn render_commands_item(item: &Item, ctx: &RenderItemCtx) -> String {
+    if let Some(s) = item
+        .data
+        .as_ref()
+        .and_then(|d| d.downcast_ref::<InlinePane>())
+    {
+        let color = if s.is_current {
+            &ctx.colors.accent
+        } else if s.pane_active {
+            ACTIVE_PANE_FG
+        } else {
+            &ctx.colors.muted
+        };
+        render_item_styled(item, ctx.colors, ctx.active, ctx.width, Some(color))
+    } else {
+        render_default_item(item, ctx.colors, ctx.active, ctx.width)
+    }
 }
 
 /// Live panes as flat, query-only items so the main palette can search panes
@@ -424,7 +459,7 @@ fn pane_marker(p: &Pane, colors: &Colors) -> (String, char) {
     if p.is_current {
         (colors.accent.clone(), '▶')
     } else if p.pane_active {
-        ("\x1b[38;2;166;227;161m".to_string(), '●')
+        (ACTIVE_PANE_FG.to_string(), '●')
     } else {
         (colors.muted.clone(), '○')
     }
@@ -642,10 +677,39 @@ mod tests {
         assert!(desc0.contains("editor"));
         // Selecting performs the pane switch.
         assert!(matches!(&items[0].action, Action::Tmux(c) if c.contains("select-pane -t 'main:1.0'")));
+        // Marker state rides in `data` (color is applied from the live theme).
+        let s0 = items[0].data.as_ref().unwrap().downcast_ref::<InlinePane>().unwrap();
+        assert!(s0.is_current && s0.pane_active);
 
-        // Inactive pane: hollow marker, no color override.
+        // Inactive pane: hollow marker; not current/active.
         assert_eq!(items[1].icon.as_deref(), Some("○"));
-        assert_eq!(items[1].icon_color, None);
+        let s1 = items[1].data.as_ref().unwrap().downcast_ref::<InlinePane>().unwrap();
+        assert!(!s1.is_current && !s1.pane_active);
+    }
+
+    #[test]
+    fn inline_marker_color_follows_theme() {
+        let colors = Colors {
+            accent: "ACCENT".into(),
+            muted: "MUTED".into(),
+            ..Default::default()
+        };
+        let mk_ctx = || RenderItemCtx {
+            colors: &colors,
+            active: false,
+            width: 60,
+        };
+        let cur = parse_pane_line("s\t0\t0\tw\tt\tcmd\t/p\t1\t1", "s:0.0").unwrap();
+        let other = parse_pane_line("s\t0\t1\tw\tt\tcmd\t/p\t0\t0", "s:0.0").unwrap();
+        let items = panes_to_inline_items(&[cur, other]);
+
+        // Current pane marker uses the theme accent.
+        let row_cur = render_commands_item(&items[0], &mk_ctx());
+        assert!(row_cur.contains("ACCENT"));
+        // Inactive pane marker uses muted, never accent.
+        let row_other = render_commands_item(&items[1], &mk_ctx());
+        assert!(row_other.contains("MUTED"));
+        assert!(!row_other.contains("ACCENT"));
     }
 
     #[test]
