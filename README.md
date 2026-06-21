@@ -52,7 +52,8 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
 The `stable` branch ships prebuilt binaries in [`dist/`](dist) (published by CI),
 so you can install without Rust. Prebuilts are provided for **Linux x86_64**,
 **Linux arm64**, and **macOS arm64 (Apple Silicon)**; other platforms fall back
-to a source build.
+to a source build. Linux prebuilts are built with musl so they do not require a
+specific host glibc version.
 
 ```bash
 git clone --branch stable --depth 1 git@github.com:vothanhdat/tmux-palette-rs.git ~/Sites/tmux-palette

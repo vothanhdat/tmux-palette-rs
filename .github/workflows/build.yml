@@ -25,13 +25,16 @@ jobs:
         include:
           - name: linux-x64
             os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
           - name: linux-arm64
             os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
+            target: aarch64-unknown-linux-musl
           - name: macos-arm64
             os: macos-14
             target: aarch64-apple-darwin
+    env:
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
 
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +44,10 @@ jobs:
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
           rustup target add ${{ matrix.target }}
+
+      - name: Install musl linker
+        if: contains(matrix.target, 'unknown-linux-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - uses: Swatinem/rust-cache@v2
         with:
