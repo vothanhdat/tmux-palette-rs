@@ -40,13 +40,41 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
 
 ## Requirements
 
-- A Rust toolchain to build (`cargo`, stable) — see https://rustup.rs
 - tmux 3.4+ recommended (`display-popup -E` support; tested on 3.3a)
+- To install a prebuilt binary: nothing else (see below).
+- To build from source: a Rust toolchain (`cargo`, stable) — see https://rustup.rs
 - Optional tools for examples only: `gh`, `jq`, `docker`, `npm`, `git`, etc.
 
 ## Install
 
-### Manual
+### From the `stable` branch — prebuilt, no toolchain
+
+The `stable` branch ships prebuilt binaries in [`dist/`](dist) (published by CI),
+so you can install without Rust. Prebuilts are provided for **Linux x86_64** and
+**macOS arm64 (Apple Silicon)**; other platforms fall back to a source build.
+
+```bash
+git clone --branch stable --depth 1 <this-repo> ~/Sites/tmux-palette
+cd ~/Sites/tmux-palette
+./install.sh                     # copies the right binary to ~/.local/bin/tmux-palette
+# or: ./install.sh /usr/local/bin/tmux-palette
+```
+
+Then bind it (the installer prints this line for you):
+
+```tmux
+bind -n C-Space run-shell "~/.local/bin/tmux-palette"
+```
+
+The prebuilt binary is also usable directly without the installer, e.g.
+`~/Sites/tmux-palette/dist/tmux-palette-linux-x64`.
+
+**Via TPM, no build:** point `@plugin` at this repo with `stable` as its default
+branch (or your fork's default branch set to `stable`). The plugin's loader
+auto-detects the prebuilt in `dist/` and skips compiling — `cargo` is only used
+as a fallback when no prebuilt matches your platform.
+
+### Manual (build from source)
 
 ```bash
 git clone <this-repo> ~/Sites/tmux-palette
@@ -88,9 +116,10 @@ set -g @palette-find-pane-key 'M-f'       # optional, no binding by default
 set -g @palette-move-pane-key 'M-m'       # optional, no binding by default
 ```
 
-Then `prefix + I`. TPM clones the repo, runs `cargo build --release` on first
-load, and binds the keys for you. Set `@palette-key 'off'` to skip the main
-binding and bind it yourself.
+Then `prefix + I`. TPM clones the repo and binds the keys for you. The loader
+uses the prebuilt binary from `dist/` when one matches your platform (no build);
+otherwise it runs `cargo build --release` once. Set `@palette-key 'off'` to skip
+the main binding and bind it yourself.
 
 ### Install the binary on PATH (alternative)
 

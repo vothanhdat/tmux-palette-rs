@@ -1,11 +1,14 @@
 name: build
 
 # Build release binaries for macOS (Apple Silicon) and Linux x64 on the
-# `stable` branch, using the Rust stable toolchain.
+# `stable` branch, using the Rust stable toolchain, then commit the prebuilt
+# binaries back into `stable/dist/` so the plugin installs without compiling.
 on:
   push:
     branches: [stable]
     tags: ["v*"]
+    # The publish step commits into dist/; ignore it so that doesn't re-trigger.
+    paths-ignore: ["dist/**"]
   workflow_dispatch:
 
 permissions:
@@ -51,3 +54,44 @@ jobs:
           name: tmux-palette-${{ matrix.name }}
           path: target/${{ matrix.target }}/release/tmux-palette
           if-no-files-found: error
+
+  # Commit the freshly built binaries into stable/dist/ so users can install
+  # straight from the branch with no toolchain. Runs only for pushes to stable.
+  publish:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/stable'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-stable
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stable
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage binaries into dist/
+        run: |
+          mkdir -p dist
+          cp artifacts/tmux-palette-linux-x64/tmux-palette   dist/tmux-palette-linux-x64
+          cp artifacts/tmux-palette-macos-arm64/tmux-palette dist/tmux-palette-macos-arm64
+          chmod +x dist/tmux-palette-linux-x64 dist/tmux-palette-macos-arm64
+
+      - name: Commit prebuilt binaries
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f dist/tmux-palette-linux-x64 dist/tmux-palette-macos-arm64
+          if git diff --cached --quiet; then
+            echo "No binary changes to commit."
+          else
+            # GITHUB_TOKEN pushes don't re-trigger workflows; [skip ci] is a
+            # belt-and-suspenders guard alongside the dist/** paths-ignore.
+            git commit -m "ci: publish prebuilt binaries [skip ci]"
+            git push origin HEAD:stable
+          fi
