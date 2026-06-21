@@ -137,6 +137,19 @@ fn shortcut_fragment(item: &Item, colors: &Colors, active: bool, row_bg: &str) -
 }
 
 pub fn render_default_item(item: &Item, colors: &Colors, active: bool, body_width: i64) -> String {
+    render_item_styled(item, colors, active, body_width, None)
+}
+
+/// Like [`render_default_item`], but with an optional pre-built ANSI color for
+/// the icon glyph that wins over the item's own `icon_color`/accent fallback.
+/// Lets callers (e.g. inlined panes) tint the marker per the live theme.
+pub fn render_item_styled(
+    item: &Item,
+    colors: &Colors,
+    active: bool,
+    body_width: i64,
+    icon_override: Option<&str>,
+) -> String {
     let row_bg = if active {
         &colors.selected
     } else {
@@ -153,17 +166,20 @@ pub fn render_default_item(item: &Item, colors: &Colors, active: bool, body_widt
         " ".to_string()
     };
     let icon_glyph = item.icon.clone().filter(|i| !i.is_empty());
-    let icon_color = item
-        .icon_color
-        .as_deref()
-        .and_then(hex_to_fg)
-        .unwrap_or_else(|| {
-            if active {
-                active_hi.to_string()
-            } else {
-                colors.accent.clone()
-            }
-        });
+    let icon_color = match icon_override {
+        Some(c) => c.to_string(),
+        None => item
+            .icon_color
+            .as_deref()
+            .and_then(hex_to_fg)
+            .unwrap_or_else(|| {
+                if active {
+                    active_hi.to_string()
+                } else {
+                    colors.accent.clone()
+                }
+            }),
+    };
     let icon = match &icon_glyph {
         Some(g) => format!("{}{}{}{}", icon_color, g, colors.reset, row_bg),
         None => " ".to_string(),
