@@ -1,0 +1,23 @@
+[package]
+name = "tmux-palette"
+version = "0.3.0"
+edition = "2021"
+description = "Raycast-style command palette for tmux — fast, scriptable, easy to extend (Rust port)"
+license = "MIT"
+repository = "https://github.com/eduwass/tmux-palette"
+default-run = "tmux-palette"
+
+[[bin]]
+name = "tmux-palette"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+panic = "abort"
