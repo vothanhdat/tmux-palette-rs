@@ -40,6 +40,25 @@ Environment:
 EOF
 }
 
+github_repo_from_remote() {
+  case "$1" in
+    git@github.com:*)
+      repo="${1#git@github.com:}"
+      ;;
+    https://github.com/*)
+      repo="${1#https://github.com/}"
+      ;;
+    ssh://git@github.com/*)
+      repo="${1#ssh://git@github.com/}"
+      ;;
+    *)
+      repo=""
+      ;;
+  esac
+  repo="${repo%.git}"
+  printf '%s' "$repo"
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -d|--dest)
@@ -103,7 +122,7 @@ if [ -f "$SCRIPT_DIR/dist/$ASSET" ]; then
 else
   if [ -z "$REPO" ] && command -v git >/dev/null 2>&1; then
     REMOTE="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || true)"
-    REPO="$(printf '%s' "$REMOTE" | sed -E 's#^git@github\.com:##; s#^https://github\.com/##; s#\.git$##')"
+    REPO="$(github_repo_from_remote "$REMOTE")"
   fi
   if [ -z "$REPO" ]; then
     REPO="$DEFAULT_REPO"
