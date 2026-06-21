@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::palette::PaletteLoader;
 use crate::palettes::commands::commands;
-use crate::palettes::find_pane::find_pane;
+use crate::palettes::find_pane::{find_pane, inline_pane_items};
 use crate::palettes::move_pane::move_pane;
 use crate::palettes::themes::themes;
 use crate::theme::{resolve_active_theme, tmux_body_style, tmux_color};
@@ -232,6 +232,19 @@ pub fn load_palette(name: &str) -> Option<PaletteDef> {
 /// Loader passed into the runner for in-process sub-palette navigation.
 pub fn make_loader() -> PaletteLoader {
     Rc::new(load_palette)
+}
+
+/// Append live panes as query-only inline items, so typing in the main palette
+/// searches panes directly instead of requiring a hop through Find Pane. Kept
+/// out of `load_palette`/`measure` so popup sizing and custom palettes are
+/// unaffected and only the interactive instance pays the `tmux list-panes` cost.
+pub fn with_inline_panes(def: PaletteDef) -> PaletteDef {
+    let mut items = def.resolve_items();
+    items.extend(inline_pane_items());
+    PaletteDef {
+        items: ItemsSource::Static(items),
+        ..def
+    }
 }
 
 /// Apply `--category=<name>` to a resolved palette: filter items to that

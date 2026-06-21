@@ -58,6 +58,12 @@ fn apply_user_overrides(items: Vec<Item>) -> Vec<Item> {
         .collect()
 }
 
+/// Items shown when the search box is empty: everything except `query_only`
+/// rows, which only surface once the user starts typing.
+fn drop_query_only(items: &[Item]) -> Vec<Item> {
+    items.iter().filter(|i| !i.query_only).cloned().collect()
+}
+
 fn clamp_scroll(rows: &[Row], list_height: usize, selected: usize, scroll: usize) -> usize {
     let mut scroll = scroll as i64;
     let lh = list_height as i64;
@@ -265,7 +271,9 @@ impl Runner {
         let needle: String = self.filter.iter().collect();
         let needle = needle.trim();
         if needle.is_empty() {
-            return self.items.clone();
+            // `query_only` items (e.g. inlined live panes) stay hidden until the
+            // user types, keeping the resting palette uncluttered.
+            return drop_query_only(&self.items);
         }
         if let Some(f) = &self.current_def.filter {
             return f(&self.items, needle);
@@ -862,6 +870,21 @@ mod tests {
         assert_eq!(word_back(&s, 5), 0);
         assert_eq!(word_forward(&s, 0), 5);
         assert_eq!(word_forward(&s, 6), 16);
+    }
+
+    #[test]
+    fn drop_query_only_hides_until_search() {
+        let mk = |title: &str, q: bool| Item {
+            title: title.into(),
+            query_only: q,
+            ..Default::default()
+        };
+        let items = vec![mk("Split", false), mk("nvim", true), mk("Find Pane", false)];
+        let resting: Vec<String> = drop_query_only(&items)
+            .into_iter()
+            .map(|i| i.title)
+            .collect();
+        assert_eq!(resting, vec!["Split".to_string(), "Find Pane".to_string()]);
     }
 
     #[test]

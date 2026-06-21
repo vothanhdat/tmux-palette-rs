@@ -293,6 +293,63 @@ fn build_items() -> Vec<Item> {
     items
 }
 
+/// Marker glyph + optional color for a pane row rendered with the *default*
+/// item renderer (used by the inline panes in the main palette).
+fn pane_inline_icon(p: &Pane) -> (&'static str, Option<String>) {
+    if p.is_current {
+        ("▶", None)
+    } else if p.pane_active {
+        ("●", Some("#a6e3a1".to_string()))
+    } else {
+        ("○", None)
+    }
+}
+
+/// Searchable, human-readable context for a pane: location plus the bits the
+/// dedicated Find Pane filter also matches (window, command, agent, path).
+fn pane_inline_description(p: &Pane) -> String {
+    // Order matters (location first); skip empties and tokens already shown
+    // (e.g. `pane_title == command`, or `agent == command` for AI tools).
+    let mut ctx: Vec<String> = Vec::new();
+    let mut push = |s: &str| {
+        if !s.is_empty() && !ctx.iter().any(|e| e == s) && s != p.pane_title {
+            ctx.push(s.to_string());
+        }
+    };
+    push(&p.target);
+    push(&p.window_name);
+    push(&p.command);
+    push(&p.agent);
+    push(&shorten_path(&p.path));
+    ctx.join("  ")
+}
+
+fn panes_to_inline_items(panes: &[Pane]) -> Vec<Item> {
+    panes
+        .iter()
+        .map(|p| {
+            let (icon, icon_color) = pane_inline_icon(p);
+            Item {
+                icon: Some(icon.to_string()),
+                icon_color,
+                title: p.pane_title.clone(),
+                description: Some(pane_inline_description(p)),
+                action: pane_select_action(p),
+                query_only: true,
+                ..Default::default()
+            }
+        })
+        .collect()
+}
+
+/// Live panes as flat, query-only items so the main palette can search panes
+/// without first entering the Find Pane sub-palette. Hidden until the user
+/// types (see `query_only`), then ranked by the default fuzzy filter.
+pub fn inline_pane_items() -> Vec<Item> {
+    let Fetched { panes, .. } = fetch_panes();
+    panes_to_inline_items(&panes)
+}
+
 fn shorten_path(path: &str) -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     if !home.is_empty() && path.starts_with(&home) {
@@ -563,6 +620,32 @@ mod tests {
         assert!(p.is_current);
         assert!(p.pane_active);
         assert_eq!(p.pane_title, "nvim");
+    }
+
+    #[test]
+    fn inline_items_are_query_only_and_searchable() {
+        let panes = vec![
+            parse_pane_line("main\t1\t0\teditor\tnvim\tnvim\t/home/u/proj\t1\t1", "main:1.0")
+                .unwrap(),
+            parse_pane_line("work\t0\t2\tshell\tbash\tbash\t/tmp\t0\t0", "main:1.0").unwrap(),
+        ];
+        let items = panes_to_inline_items(&panes);
+        assert_eq!(items.len(), 2);
+
+        // Current pane: marker ▶, title from pane_title, query-only.
+        assert!(items[0].query_only);
+        assert_eq!(items[0].title, "nvim");
+        assert_eq!(items[0].icon.as_deref(), Some("▶"));
+        // Location + window are searchable via the description.
+        let desc0 = items[0].description.as_deref().unwrap();
+        assert!(desc0.contains("main:1.0"));
+        assert!(desc0.contains("editor"));
+        // Selecting performs the pane switch.
+        assert!(matches!(&items[0].action, Action::Tmux(c) if c.contains("select-pane -t 'main:1.0'")));
+
+        // Inactive pane: hollow marker, no color override.
+        assert_eq!(items[1].icon.as_deref(), Some("○"));
+        assert_eq!(items[1].icon_color, None);
     }
 
     #[test]

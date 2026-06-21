@@ -129,6 +129,7 @@ impl From<JsonItem> for Item {
             action: j.action.into(),
             data: None,
             selectable: j.selectable,
+            query_only: false,
         }
     }
 }
