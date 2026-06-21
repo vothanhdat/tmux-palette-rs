@@ -13,6 +13,7 @@ CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 prebuilt_name() {
   case "$(uname -s)/$(uname -m)" in
     Linux/x86_64)        echo "tmux-palette-linux-x64" ;;
+    Linux/aarch64)       echo "tmux-palette-linux-arm64" ;;
     Darwin/arm64)        echo "tmux-palette-macos-arm64" ;;
     *)                   echo "" ;;
   esac
