@@ -16,6 +16,7 @@ DEST="${1:-$HOME/.local/bin/tmux-palette}"
 
 case "$(uname -s)/$(uname -m)" in
   Linux/x86_64) ASSET="tmux-palette-linux-x64" ;;
+  Linux/aarch64) ASSET="tmux-palette-linux-arm64" ;;
   Darwin/arm64) ASSET="tmux-palette-macos-arm64" ;;
   *)
     echo "No prebuilt binary for $(uname -s)/$(uname -m)." >&2
