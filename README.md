@@ -54,20 +54,20 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
 
 ### One-line install — prebuilt, no toolchain
 
-The `stable` branch ships prebuilt binaries in [`dist/`](dist) (published by CI),
+The `master` branch ships prebuilt binaries in [`dist/`](dist) (published by CI),
 so you can install without Rust. Prebuilts are provided for **Linux x86_64**,
 **Linux arm64**, and **macOS arm64 (Apple Silicon)**; other platforms fall back
 to a source build. Linux prebuilts are built with musl so they do not require a
 specific host glibc version.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/stable/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/master/install.sh | sh
 ```
 
 Install somewhere else:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/stable/install.sh | sh -s -- --dest /usr/local/bin/tmux-palette
+curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/master/install.sh | sh -s -- --dest /usr/local/bin/tmux-palette
 ```
 
 Then bind it (the installer prints this line for you):
@@ -85,14 +85,14 @@ tmux source-file ~/.tmux.conf
 You can also download the installer first and inspect its options:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/stable/install.sh
+curl -fsSLO https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/master/install.sh
 sh install.sh --help
 ```
 
 ### From a checkout
 
 ```bash
-git clone --branch stable --depth 1 git@github.com:vothanhdat/tmux-palette-rs.git ~/Sites/tmux-palette
+git clone --depth 1 git@github.com:vothanhdat/tmux-palette-rs.git ~/Sites/tmux-palette
 cd ~/Sites/tmux-palette
 ./install.sh                     # copies the right binary to ~/.local/bin/tmux-palette
 # or: ./install.sh /usr/local/bin/tmux-palette
@@ -101,10 +101,10 @@ cd ~/Sites/tmux-palette
 The prebuilt binary is also usable directly without the installer, e.g.
 `~/Sites/tmux-palette/dist/tmux-palette-linux-x64`.
 
-**Via TPM, no build:** point `@plugin` at this repo with `stable` as its default
-branch (or your fork's default branch set to `stable`). The plugin's loader
-auto-detects the prebuilt in `dist/` and skips compiling — `cargo` is only used
-as a fallback when no prebuilt matches your platform.
+**Via TPM, no build:** the default branch (`master`) ships the prebuilts in
+`dist/`, so the plugin's loader auto-detects the right one and skips compiling.
+If you install from a branch without prebuilts, the loader downloads one; `cargo`
+is only used as a last-resort fallback when no prebuilt matches your platform.
 
 ### Manual (build from source)
 
@@ -148,10 +148,10 @@ set -g @palette-find-pane-key 'M-f'       # optional, no binding by default
 set -g @palette-move-pane-key 'M-m'       # optional, no binding by default
 ```
 
-Then `prefix + I`. TPM clones the repo and binds the keys for you. The loader
-uses the prebuilt binary from `dist/` when one matches your platform (no build);
-otherwise it runs `cargo build --release` once. Set `@palette-key 'off'` to skip
-the main binding and bind it yourself.
+Then `prefix + I`. TPM clones the default branch (`master`), which ships the
+prebuilts in `dist/`, and binds the keys for you — no build. If your platform has
+no prebuilt, the loader downloads one (or runs `cargo build --release` as a last
+resort). Set `@palette-key 'off'` to skip the main binding and bind it yourself.
 
 ### Install the binary on PATH (alternative)
 

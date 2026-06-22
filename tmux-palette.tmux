@@ -2,8 +2,9 @@
 # TPM entry point for tmux-palette (Rust port).
 # Sourced by tmux when the plugin is installed via tmux-plugins/tpm.
 #
-# Prefers a prebuilt binary shipped in dist/ (so installing from the `stable`
-# branch needs no Rust toolchain); falls back to `cargo build --release`.
+# Prefers a prebuilt binary shipped in dist/ (so installing from the `master`
+# branch needs no Rust toolchain); downloads one if the clone has none, and
+# falls back to `cargo build --release`.
 
 set -eu
 
@@ -17,6 +18,49 @@ prebuilt_name() {
     Darwin/arm64)        echo "tmux-palette-macos-arm64" ;;
     *)                   echo "" ;;
   esac
+}
+
+# Repo to fetch a prebuilt from when dist/ has none (e.g. the plugin was cloned
+# from a branch without prebuilts, like the default `master`). Derived from the
+# clone's origin so forks fetch their own; overridable with @palette-repo,
+# falling back to upstream.
+palette_repo() {
+  local repo remote
+  repo="$(tmux show-option -gqv @palette-repo 2>/dev/null || true)"
+  if [ -z "$repo" ]; then
+    remote="$(git -C "$CURRENT_DIR" remote get-url origin 2>/dev/null || true)"
+    case "$remote" in
+      *github.com[:/]*)
+        repo="${remote##*github.com}"   # drop scheme/host (and any user@)
+        repo="${repo#[:/]}"             # drop leading : or /
+        repo="${repo%.git}"
+        ;;
+    esac
+  fi
+  echo "${repo:-vothanhdat/tmux-palette-rs}"
+}
+
+# Download the prebuilt for this platform into dist/ — no toolchain required.
+# Sets BIN on success; returns non-zero otherwise. Cached in dist/, so this
+# runs at most once per install.
+download_prebuilt() {
+  [ -n "$PREBUILT" ] || return 1
+  local repo ref url dest
+  repo="$(palette_repo)"
+  ref="$(tmux show-option -gqv @palette-ref 2>/dev/null || true)"
+  ref="${ref:-master}"
+  url="https://raw.githubusercontent.com/$repo/$ref/dist/$PREBUILT"
+  dest="$CURRENT_DIR/dist/$PREBUILT"
+  mkdir -p "$CURRENT_DIR/dist"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$dest" || return 1
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$dest" "$url" || return 1
+  else
+    return 1
+  fi
+  chmod +x "$dest" 2>/dev/null || true
+  BIN="$dest"
 }
 
 BIN=""

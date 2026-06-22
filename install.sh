@@ -3,17 +3,17 @@
 #
 # Usage:
 #   ./install.sh [DEST]
-#   curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/stable/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/master/install.sh | sh
 #
 # Picks the prebuilt binary for this platform. When run as a file from a
-# checkout of the `stable` branch it uses the local dist/ binary; otherwise
+# checkout of the `master` branch it uses the local dist/ binary; otherwise
 # (including `curl ... | sh`) it downloads it from GitHub. DEST defaults to
 # ~/.local/bin/tmux-palette.
 
 set -eu
 
 DEFAULT_REPO="vothanhdat/tmux-palette-rs"
-DEFAULT_REF="stable"
+DEFAULT_REF="master"
 DEST="$HOME/.local/bin/tmux-palette"
 REPO="${TMUX_PALETTE_REPO:-}"
 REF="${TMUX_PALETTE_REF:-$DEFAULT_REF}"
