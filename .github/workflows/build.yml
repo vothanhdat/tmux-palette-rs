@@ -1,12 +1,12 @@
 name: build
 
 # Build release binaries for macOS (Apple Silicon), Linux x64, and Linux arm64
-# on the `stable` branch, using the Rust stable toolchain, then commit the
-# prebuilt binaries back into `stable/dist/` so the plugin installs without
-# compiling.
+# on the `master` branch, using the Rust stable toolchain, then commit the
+# prebuilt binaries back into `master/dist/` so the plugin installs without
+# compiling. Also builds + tests `dev` (without publishing) for CI coverage.
 on:
   push:
-    branches: [stable]
+    branches: [master, dev]
     tags: ["v*"]
     # The publish step commits into dist/; ignore it so that doesn't re-trigger.
     paths-ignore: ["dist/**"]
@@ -66,21 +66,21 @@ jobs:
           path: target/${{ matrix.target }}/release/tmux-palette
           if-no-files-found: error
 
-  # Commit the freshly built binaries into stable/dist/ so users can install
-  # straight from the branch with no toolchain. Runs only for pushes to stable.
+  # Commit the freshly built binaries into master/dist/ so users can install
+  # straight from the branch with no toolchain. Runs only for pushes to master.
   publish:
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/stable'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     concurrency:
-      group: publish-stable
+      group: publish-master
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: stable
+          ref: master
 
       - uses: actions/download-artifact@v4
         with:
@@ -105,5 +105,5 @@ jobs:
             # GITHUB_TOKEN pushes don't re-trigger workflows; [skip ci] is a
             # belt-and-suspenders guard alongside the dist/** paths-ignore.
             git commit -m "ci: publish prebuilt binaries [skip ci]"
-            git push origin HEAD:stable
+            git push origin HEAD:master
           fi
