@@ -146,12 +146,22 @@ set -g @plugin 'vothanhdat/tmux-palette-rs'
 set -g @palette-key 'C-Space'             # optional, default: C-Space (no-prefix)
 set -g @palette-find-pane-key 'M-f'       # optional, no binding by default
 set -g @palette-move-pane-key 'M-m'       # optional, no binding by default
+set -g @palette-prefix 'off'              # optional, 'on' = bind behind the prefix
 ```
 
 Then `prefix + I`. TPM clones the default branch (`master`), which ships the
 prebuilts in `dist/`, and binds the keys for you — no build. If your platform has
 no prebuilt, the loader downloads one (or runs `cargo build --release` as a last
 resort). Set `@palette-key 'off'` to skip the main binding and bind it yourself.
+
+By default the keys are bound in the **root table** (press them directly, no
+prefix). Set `@palette-prefix 'on'` to bind them in the **prefix table** instead,
+so they fire as `<prefix> <key>`:
+
+```tmux
+set -g @palette-prefix 'on'
+set -g @palette-key 'p'                   # now: prefix + p
+```
 
 ### Install the binary on PATH (alternative)
 
