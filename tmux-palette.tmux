@@ -95,14 +95,27 @@ PALETTE_KEY="$(get_opt @palette-key 'C-Space')"
 FIND_PANE_KEY="$(get_opt @palette-find-pane-key '')"
 MOVE_PANE_KEY="$(get_opt @palette-move-pane-key '')"
 
+# Keys bind in the root table (press them directly) by default. Set
+# `@palette-prefix on` to bind them in the prefix table instead, so they fire
+# as `<prefix> <key>` (e.g. `set -g @palette-prefix on` + `@palette-key p`).
+USE_PREFIX="$(get_opt @palette-prefix 'off')"
+
+palette_bind() {
+  local key="$1"; shift
+  case "$USE_PREFIX" in
+    on|true|yes|1) tmux bind-key "$key" "$@" ;;   # prefix table
+    *)             tmux bind-key -n "$key" "$@" ;; # root table (no prefix)
+  esac
+}
+
 if [ "$PALETTE_KEY" != "off" ] && [ -n "$PALETTE_KEY" ]; then
-  tmux bind-key -n "$PALETTE_KEY" run-shell "$BIN"
+  palette_bind "$PALETTE_KEY" run-shell "$BIN"
 fi
 
 if [ -n "$FIND_PANE_KEY" ]; then
-  tmux bind-key -n "$FIND_PANE_KEY" run-shell "$BIN find-pane"
+  palette_bind "$FIND_PANE_KEY" run-shell "$BIN find-pane"
 fi
 
 if [ -n "$MOVE_PANE_KEY" ]; then
-  tmux bind-key -n "$MOVE_PANE_KEY" run-shell "$BIN move-pane"
+  palette_bind "$MOVE_PANE_KEY" run-shell "$BIN move-pane"
 fi
