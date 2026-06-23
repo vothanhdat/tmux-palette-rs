@@ -274,6 +274,16 @@ src/
 
 Run the tests with `cargo test`.
 
+### Branches
+
+- **`master`** — the release branch. Carries the prebuilt binaries in `dist/`
+  (published by CI) and is what the installer, README, and TPM pull from. It is
+  the repo's default branch, so `set -g @plugin 'vothanhdat/tmux-palette-rs'`
+  installs with no build.
+- **`dev`** — where development happens (source only, no `dist/`). Open changes
+  here; CI builds and tests every push. Merge `dev` → `master` to cut a release,
+  and CI republishes the prebuilts.
+
 ## License
 
 MIT. Original project by Eduard Wassermann; see [LICENSE](LICENSE).
