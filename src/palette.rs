@@ -39,6 +39,15 @@ struct EscAction {
     x_end: i64,
 }
 
+/// Tab-cycling completion state. `candidates` are the completion strings
+/// captured from the typed stem on the first Tab; `applied` is the input we last
+/// wrote, so we can tell an untouched cycle from a fresh edit.
+struct Completion {
+    candidates: Vec<String>,
+    index: usize,
+    applied: Vec<char>,
+}
+
 fn apply_user_overrides(items: Vec<Item>) -> Vec<Item> {
     let shortcuts = user_shortcuts();
     let aliases = user_aliases();
@@ -165,6 +174,7 @@ pub struct Runner {
     row_actions: Vec<RowAction>,
     esc_action: Option<EscAction>,
     stack: Vec<NavState>,
+    completion: Option<Completion>,
 
     loader: Option<PaletteLoader>,
     raw_mode: Option<RawMode>,
@@ -203,6 +213,7 @@ impl Runner {
             row_actions: Vec::new(),
             esc_action: None,
             stack: Vec::new(),
+            completion: None,
             loader,
             raw_mode: None,
         }
@@ -524,7 +535,60 @@ impl Runner {
                 let p = p.clone();
                 self.dispatch_popup_action(&p);
             }
+            Action::Fill(text) => {
+                let text = text.clone();
+                self.set_input(&text);
+                self.render();
+            }
             _ => self.dispatch_direct_action(item),
+        }
+    }
+
+    /// Replace the search input (used by `Action::Fill` for completion),
+    /// resetting the selection to the top of the refreshed results.
+    fn set_input(&mut self, text: &str) {
+        self.filter = text.chars().collect();
+        self.filter_cursor = self.filter.len();
+        self.selection_anchor = None;
+        self.selected = 0;
+        self.scroll = 0;
+    }
+
+    /// Tab / Shift-Tab: cycle through the completions of the typed stem. The
+    /// first press captures the candidate list (the completable items currently
+    /// visible) so cycling survives the input changing under it; a `step` of +1
+    /// advances, -1 goes back. Any other keystroke clears the cycle.
+    fn cycle_completion(&mut self, step: i64, vis: &[Item]) {
+        let continuing = self
+            .completion
+            .as_ref()
+            .is_some_and(|c| c.applied == self.filter);
+        if !continuing {
+            let candidates: Vec<String> = vis.iter().filter_map(|i| i.complete.clone()).collect();
+            if candidates.is_empty() {
+                self.completion = None;
+                return;
+            }
+            let index = if step < 0 { candidates.len() - 1 } else { 0 };
+            self.completion = Some(Completion {
+                candidates,
+                index,
+                applied: Vec::new(),
+            });
+        } else if let Some(c) = self.completion.as_mut() {
+            let n = c.candidates.len() as i64;
+            c.index = (((c.index as i64 + step) % n + n) % n) as usize;
+        }
+        let text = self
+            .completion
+            .as_ref()
+            .map(|c| c.candidates[c.index].clone());
+        if let Some(text) = text {
+            self.set_input(&text);
+            if let Some(c) = self.completion.as_mut() {
+                c.applied = self.filter.clone();
+            }
+            self.render();
         }
     }
 
@@ -780,6 +844,16 @@ impl Runner {
     }
 
     fn handle_key(&mut self, key: &str, vis: &[Item]) {
+        if key == "\t" {
+            self.cycle_completion(1, vis);
+            return;
+        }
+        if key == "\x1b[Z" {
+            self.cycle_completion(-1, vis);
+            return;
+        }
+        // Any other key ends an in-progress Tab-completion cycle.
+        self.completion = None;
         if self.handle_enter_or_exit(key, vis) {
             return;
         }

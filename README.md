@@ -31,6 +31,16 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
   the same fuzzy matcher) without first opening *Find Pane*. They stay hidden
   until you type, so the resting palette is unchanged. Search matches the pane
   title, session/window, running command, detected agent, and path.
+- **Command prompt** — a drop-in replacement for tmux's `prefix + :`: the
+  `command-prompt` palette lets you type any tmux command and run it. Every tmux
+  command (pulled live from `tmux list-commands`) is searchable by name and
+  alias, grouped by topic (sessions, windows, panes, …) for browsing. **Tab**
+  completes a command into the prompt and cycles through the matches
+  (**Shift-Tab** goes back); Enter runs a no-arg command immediately or completes
+  one that takes arguments. Once you've typed a complete command name, its
+  arguments expand below it — each flag/param on its own line, tagged
+  optional/required, with a short description — and stay there while you fill
+  them in
 - **Custom palettes** — define your own with a single JSON file, bind to any key
 - **Hide built-ins** — declutter the default palette via `hidden.json`
 - **Mobile-aware** — auto-fullscreens on narrow terminals (Moshi / Blink on iOS)
@@ -135,6 +145,13 @@ bind -n M-f run-shell "~/Sites/tmux-palette/target/release/tmux-palette find-pan
 bind -n M-m run-shell "~/Sites/tmux-palette/target/release/tmux-palette move-pane"
 ```
 
+Replace tmux's built-in `prefix + :` command prompt with the palette version
+(note: `:` is a prefix-table binding, so no `-n`):
+
+```tmux
+bind : run-shell "~/Sites/tmux-palette/target/release/tmux-palette command-prompt"
+```
+
 Reload: `tmux source-file ~/.tmux.conf` and hit your binding.
 
 ### Via TPM (Tmux Plugin Manager)
@@ -146,6 +163,7 @@ set -g @plugin 'vothanhdat/tmux-palette-rs'
 set -g @palette-key 'C-Space'             # optional, default: C-Space (no-prefix)
 set -g @palette-find-pane-key 'M-f'       # optional, no binding by default
 set -g @palette-move-pane-key 'M-m'       # optional, no binding by default
+set -g @palette-command-prompt-key ':'    # optional, replaces prefix + : (always prefix table)
 set -g @palette-prefix 'off'              # optional, 'on' = bind behind the prefix
 ```
 
@@ -176,6 +194,8 @@ cargo install --path .
 - **Up/Down arrows** or **Ctrl+P / Ctrl+N** to move selection.
 - **PageUp / PageDown** jump 10 rows.
 - **Enter** to run the selected command.
+- **Tab / Shift-Tab** (in the `command-prompt` palette) complete a command into
+  the prompt and cycle forward/backward through the matches.
 - **Esc** to cancel (or pop back one level in a nested palette).
 - **Mouse** works too — click rows, scroll the wheel, click `esc`.
 
@@ -262,6 +282,12 @@ terminal's own colorscheme. See the bundled `terminal` theme.
 - The main palette inlines live panes as you type, so you can jump to a pane
   without first entering *Find Pane* (the original only exposed panes through the
   dedicated sub-palette).
+- A new `command-prompt` palette replaces tmux's `prefix + :` prompt: type any
+  tmux command to run it, with every command from `tmux list-commands` searchable
+  as a suggestion and grouped by topic for browsing. Selecting one runs it or
+  completes it into the prompt; Tab cycles through matches; and once you've typed
+  a full command name its arguments expand (optional/required, with descriptions)
+  and stay expanded while you type them — none of which the original had.
 
 ## Project layout
 
@@ -279,7 +305,7 @@ src/
   tmux.rs            tmux command helpers
   user_config.rs     ~/.config/tmux-palette/*.json loaders
   raw.rs             termios raw mode, terminal size, signal handling
-  palettes/          commands, find-pane, move-pane, themes
+  palettes/          commands, command-prompt, find-pane, move-pane, themes
 ```
 
 Run the tests with `cargo test`.

@@ -33,6 +33,9 @@ pub enum Action {
     Run(RunFn),
     /// Runs in-process WITHOUT closing the popup, then navigates back.
     Apply(RunFn),
+    /// Replaces the search input with the given text (command completion) and
+    /// keeps the palette open — never dispatches or closes.
+    Fill(String),
 }
 
 pub type RunFn = Rc<dyn Fn(&ActionContext)>;
@@ -59,6 +62,10 @@ pub struct Item {
     /// When `true`, the item is hidden until the user types a search query
     /// (e.g. live panes inlined into the main palette).
     pub query_only: bool,
+    /// Text to drop into the search input when this item is Tab-completed
+    /// (command-name completion in the command-prompt palette). `None` means the
+    /// item does not participate in Tab completion.
+    pub complete: Option<String>,
 }
 
 impl Default for Item {
@@ -75,6 +82,7 @@ impl Default for Item {
             data: None,
             selectable: None,
             query_only: false,
+            complete: None,
         }
     }
 }
