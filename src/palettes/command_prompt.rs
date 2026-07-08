@@ -8,10 +8,12 @@
 //! palette loop), and a synthetic "Run: <what you typed>" row always dispatches
 //! the typed line via the after-popup trick that keeps interactive prompts fed.
 //!
-//! When the filter narrows to exactly one command, its arguments are expanded
-//! below it — one param per line, tagged optional/required, with a short
-//! description drawn from a bundled glossary of tmux's (very consistent)
-//! placeholder names and common flags.
+//! Once the first word is a complete command name (or alias) — i.e. you've
+//! typed `<command> …` and moved on to its parameters — that command's
+//! arguments are expanded below it, one per line, tagged optional/required with
+//! a short description drawn from a bundled glossary of tmux's (very consistent)
+//! placeholder names and common flags. The resting list is grouped by topic
+//! (sessions, windows, panes, …) so all ~90 commands stay browsable.
 
 use std::rc::Rc;
 
@@ -25,6 +27,74 @@ use crate::types::{Action, Colors, Item, ItemsSource, PaletteDef, RenderItemCtx}
 const RUN_ICON: &str = "▶";
 /// Icon for a tmux command row.
 const CMD_ICON: &str = "";
+
+// ---- categories --------------------------------------------------------------
+
+/// Topic groups for the resting list, in display order.
+const CATEGORIES: &[&str] = &[
+    "Sessions",
+    "Windows",
+    "Panes",
+    "Copy & Buffers",
+    "Key Bindings",
+    "Options & Hooks",
+    "Display & Prompts",
+    "Server & Misc",
+];
+
+/// Bucket a command into one of `CATEGORIES` from its name. tmux names are
+/// `verb-noun`, so the noun usually decides the group; a handful of commands
+/// whose keyword would misfile them (or that have none) are pinned explicitly.
+fn category_for(name: &str) -> &'static str {
+    match name {
+        // split-window makes a pane; clear-history clears a pane's scrollback.
+        "split-window" | "clear-history" => return "Panes",
+        "copy-mode" => return "Copy & Buffers",
+        "customize-mode" => return "Options & Hooks",
+        "command-prompt"
+        | "confirm-before"
+        | "clock-mode"
+        | "choose-tree"
+        | "clear-prompt-history"
+        | "show-prompt-history" => return "Display & Prompts",
+        "if-shell" | "run-shell" | "list-commands" | "source-file" | "wait-for"
+        | "show-messages" => return "Server & Misc",
+        _ => {}
+    }
+    if name.starts_with("display-") {
+        return "Display & Prompts";
+    }
+    // Keyword scan, most specific first (so `set-window-option` files under
+    // options, not windows).
+    const KEYWORDS: &[(&str, &str)] = &[
+        ("buffer", "Copy & Buffers"),
+        ("option", "Options & Hooks"),
+        ("hook", "Options & Hooks"),
+        ("environment", "Options & Hooks"),
+        ("pane", "Panes"),
+        ("layout", "Windows"),
+        ("window", "Windows"),
+        ("session", "Sessions"),
+        ("client", "Sessions"),
+        ("prefix", "Key Bindings"),
+        ("key", "Key Bindings"),
+        ("server", "Server & Misc"),
+    ];
+    for (kw, cat) in KEYWORDS {
+        if name.contains(kw) {
+            return cat;
+        }
+    }
+    "Server & Misc"
+}
+
+/// Position of a category in `CATEGORIES` (used to order the resting list).
+fn category_rank(cat: &str) -> usize {
+    CATEGORIES
+        .iter()
+        .position(|c| *c == cat)
+        .unwrap_or(CATEGORIES.len())
+}
 
 // ---- glossary -----------------------------------------------------------------
 
@@ -267,18 +337,26 @@ fn parse_command_line(line: &str) -> Option<Item> {
         },
         aliases: alias.map(|a| vec![a]),
         action,
+        category: Some(category_for(name).to_string()),
         // Tab completes the command name into the input, ready for arguments.
         complete: Some(format!("{} ", name)),
         ..Default::default()
     })
 }
 
-/// Every tmux command, straight from `tmux list-commands`.
+/// Every tmux command, straight from `tmux list-commands`, ordered by topic so
+/// the grouped resting list reads top to bottom without repeating headers.
 fn build_items() -> Vec<Item> {
-    tmux(&["list-commands"])
+    let mut items: Vec<Item> = tmux(&["list-commands"])
         .lines()
         .filter_map(parse_command_line)
-        .collect()
+        .collect();
+    items.sort_by(|a, b| {
+        let ra = category_rank(a.category.as_deref().unwrap_or(""));
+        let rb = category_rank(b.category.as_deref().unwrap_or(""));
+        ra.cmp(&rb).then_with(|| a.title.cmp(&b.title))
+    });
+    items
 }
 
 /// The row that runs exactly what the user typed — the core `prefix + :`
@@ -303,14 +381,15 @@ fn help_item(p: &HelpParam) -> Item {
 }
 
 /// Rank commands by name + alias only. Matching against the usage text (the
-/// item description) would make short queries subsequence-match far too many
-/// commands (e.g. `rename-window` loosely matching `respawn-window`), which also
-/// defeats the "exactly one command" help trigger.
+/// description) or topic (the category) would make short queries subsequence-
+/// match far too many commands — e.g. `rename-window` loosely matching
+/// `respawn-window`, or `copy` matching everything filed under "Copy & Buffers".
 fn match_commands(items: &[Item], query: &str) -> Vec<Item> {
     let stripped: Vec<Item> = items
         .iter()
         .map(|i| Item {
             description: None,
+            category: None,
             ..i.clone()
         })
         .collect();
@@ -320,30 +399,34 @@ fn match_commands(items: &[Item], query: &str) -> Vec<Item> {
         .collect()
 }
 
-/// Filter: fuzzy-rank the commands and always offer a "Run: <query>" row on top.
-/// When exactly one command matches, drop its inline usage and expand its
-/// arguments as help rows beneath it.
+/// True when `head` is exactly this command's name or one of its aliases.
+fn command_named(item: &Item, head: &str) -> bool {
+    item.title == head
+        || item
+            .aliases
+            .as_ref()
+            .is_some_and(|a| a.iter().any(|x| x == head))
+}
+
+/// Filter: always offer a "Run: <query>" row on top. Once the first word is a
+/// complete command name (you've typed `<command>` and are onto its
+/// parameters), show that command — keeping its usage line for reference — and
+/// expand its arguments as help rows, which stay put while you type the params.
+/// Otherwise fuzzy-rank the command list by name so a partial word just narrows
+/// the choices without prematurely committing to one.
 fn filter_commands(items: &[Item], query: &str) -> Vec<Item> {
-    let matched = match_commands(items, query);
-    let mut out = Vec::with_capacity(matched.len() + 1);
+    let mut out = Vec::new();
     out.push(run_typed_item(query));
 
-    if matched.len() == 1 {
-        let params = matched[0]
-            .description
-            .as_deref()
-            .map(parse_usage)
-            .unwrap_or_default();
-        if !params.is_empty() {
-            let mut cmd = matched[0].clone();
-            cmd.description = None; // shown expanded below instead
-            out.push(cmd);
-            out.extend(params.iter().map(help_item));
-            return out;
-        }
+    let head = query.split_whitespace().next().unwrap_or("");
+    if let Some(cmd) = items.iter().find(|it| command_named(it, head)) {
+        let params = parse_usage(cmd.description.as_deref().unwrap_or(""));
+        out.push(cmd.clone());
+        out.extend(params.iter().map(help_item));
+        return out;
     }
 
-    out.extend(matched);
+    out.extend(match_commands(items, query));
     out
 }
 
@@ -390,7 +473,7 @@ pub fn render_item(item: &Item, ctx: &RenderItemCtx) -> String {
 pub fn command_prompt() -> PaletteDef {
     PaletteDef {
         title: Some("Run Command".to_string()),
-        grouped: Some(false),
+        grouped: Some(true),
         empty_text: Some("Type a tmux command".to_string()),
         items: ItemsSource::Dynamic(Rc::new(build_items)),
         filter: Some(Rc::new(filter_commands)),
@@ -472,13 +555,14 @@ mod tests {
     }
 
     #[test]
-    fn single_match_expands_help_rows() {
+    fn exact_command_expands_help_rows() {
         let items = vec![parse_command_line("rename-window [-t target-window] new-name").unwrap()];
         let vis = filter_commands(&items, "rename-window");
         assert_eq!(vis[0].title, "Run: rename-window");
         assert_eq!(vis[1].title, "rename-window");
-        assert_eq!(vis[1].description, None); // inline usage dropped
-                                              // Help rows follow, non-selectable, carrying HelpParam data.
+        // The usage line is kept as reference while typing parameters.
+        assert!(vis[1].description.is_some());
+        // Help rows follow, non-selectable, carrying HelpParam data.
         assert!(vis.len() >= 4);
         assert_eq!(vis[2].selectable, Some(false));
         assert!(vis[2]
@@ -486,6 +570,54 @@ mod tests {
             .as_ref()
             .and_then(|d| d.downcast_ref::<HelpParam>())
             .is_some());
+    }
+
+    fn has_help_rows(vis: &[Item]) -> bool {
+        vis.iter().any(|i| {
+            i.data
+                .as_ref()
+                .is_some_and(|d| d.downcast_ref::<HelpParam>().is_some())
+        })
+    }
+
+    #[test]
+    fn partial_name_stays_a_list_but_exact_name_plus_params_expands() {
+        let items = vec![
+            parse_command_line("rename-window (renamew) [-t target-window] new-name").unwrap(),
+        ];
+        // Partial name: no help rows, just the ranked command under the Run row.
+        assert!(!has_help_rows(&filter_commands(&items, "rename-w")));
+        // Exact name alone: help expands (you've committed to the command).
+        assert!(has_help_rows(&filter_commands(&items, "rename-window")));
+        // Exact name plus a typed parameter: help stays put.
+        let typing = filter_commands(&items, "rename-window my-name");
+        assert_eq!(typing[0].title, "Run: rename-window my-name");
+        assert!(has_help_rows(&typing));
+        // The alias triggers it the same way.
+        assert!(has_help_rows(&filter_commands(&items, "renamew foo")));
+    }
+
+    #[test]
+    fn matching_ignores_category_so_topic_words_do_not_broaden() {
+        let items =
+            vec![parse_command_line("paste-buffer (pasteb) [-p] [-b buffer-name]").unwrap()];
+        // paste-buffer files under "Copy & Buffers"; "copy" (absent from its
+        // name/alias) must not match it via the category text.
+        assert!(match_commands(&items, "copy").is_empty());
+    }
+
+    #[test]
+    fn categorizes_commands_by_topic() {
+        assert_eq!(category_for("set-window-option"), "Options & Hooks");
+        assert_eq!(category_for("split-window"), "Panes");
+        assert_eq!(category_for("rename-window"), "Windows");
+        assert_eq!(category_for("kill-pane"), "Panes");
+        assert_eq!(category_for("attach-session"), "Sessions");
+        assert_eq!(category_for("paste-buffer"), "Copy & Buffers");
+        assert_eq!(category_for("bind-key"), "Key Bindings");
+        assert_eq!(category_for("display-popup"), "Display & Prompts");
+        assert_eq!(category_for("choose-tree"), "Display & Prompts");
+        assert_eq!(category_for("run-shell"), "Server & Misc");
     }
 
     #[test]
