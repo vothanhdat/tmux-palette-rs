@@ -130,6 +130,7 @@ impl From<JsonItem> for Item {
             data: None,
             selectable: j.selectable,
             query_only: false,
+            complete: None,
         }
     }
 }

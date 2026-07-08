@@ -62,6 +62,10 @@ pub struct Item {
     /// When `true`, the item is hidden until the user types a search query
     /// (e.g. live panes inlined into the main palette).
     pub query_only: bool,
+    /// Text to drop into the search input when this item is Tab-completed
+    /// (command-name completion in the command-prompt palette). `None` means the
+    /// item does not participate in Tab completion.
+    pub complete: Option<String>,
 }
 
 impl Default for Item {
@@ -78,6 +82,7 @@ impl Default for Item {
             data: None,
             selectable: None,
             query_only: false,
+            complete: None,
         }
     }
 }

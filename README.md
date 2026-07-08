@@ -33,9 +33,12 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
   title, session/window, running command, detected agent, and path.
 - **Command prompt** — a drop-in replacement for tmux's `prefix + :`: the
   `command-prompt` palette lets you type any tmux command and run it. Every tmux
-  command (pulled live from `tmux list-commands`) is searchable by name, alias,
-  and argument syntax — pick one to run it, or, when it takes arguments, to
-  complete it into the prompt so you can finish the line and run it
+  command (pulled live from `tmux list-commands`) is searchable by name and
+  alias. **Tab** completes a command into the prompt and cycles through the
+  matches (**Shift-Tab** goes back); Enter runs a no-arg command immediately or
+  completes one that takes arguments. Narrow to a single command and its
+  arguments expand below it — each flag/param on its own line, tagged
+  optional/required, with a short description
 - **Custom palettes** — define your own with a single JSON file, bind to any key
 - **Hide built-ins** — declutter the default palette via `hidden.json`
 - **Mobile-aware** — auto-fullscreens on narrow terminals (Moshi / Blink on iOS)
@@ -189,6 +192,8 @@ cargo install --path .
 - **Up/Down arrows** or **Ctrl+P / Ctrl+N** to move selection.
 - **PageUp / PageDown** jump 10 rows.
 - **Enter** to run the selected command.
+- **Tab / Shift-Tab** (in the `command-prompt` palette) complete a command into
+  the prompt and cycle forward/backward through the matches.
 - **Esc** to cancel (or pop back one level in a nested palette).
 - **Mouse** works too — click rows, scroll the wheel, click `esc`.
 
@@ -277,8 +282,9 @@ terminal's own colorscheme. See the bundled `terminal` theme.
   dedicated sub-palette).
 - A new `command-prompt` palette replaces tmux's `prefix + :` prompt: type any
   tmux command to run it, with every command from `tmux list-commands` searchable
-  as a suggestion — selecting one runs it, or completes it into the prompt when
-  it takes arguments.
+  as a suggestion. Selecting one runs it or completes it into the prompt; Tab
+  cycles through matches; and narrowing to a single command expands its arguments
+  (optional/required, with descriptions) — none of which the original had.
 
 ## Project layout
 
