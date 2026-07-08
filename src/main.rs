@@ -39,7 +39,7 @@ fn main() {
 fn run_mode(name: &str, category: Option<&str>) {
     let Some(mut def) = load_palette(name) else {
         eprintln!(
-            "Unknown palette: {}. Built-in: commands, find-pane, move-pane, themes. \
+            "Unknown palette: {}. Built-in: commands, command-prompt, find-pane, move-pane, themes. \
              Custom palettes go in ~/.config/tmux-palette/palettes/<name>.json",
             name
         );

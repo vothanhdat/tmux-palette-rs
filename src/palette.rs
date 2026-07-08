@@ -524,8 +524,23 @@ impl Runner {
                 let p = p.clone();
                 self.dispatch_popup_action(&p);
             }
+            Action::Fill(text) => {
+                let text = text.clone();
+                self.set_input(&text);
+                self.render();
+            }
             _ => self.dispatch_direct_action(item),
         }
+    }
+
+    /// Replace the search input (used by `Action::Fill` for completion),
+    /// resetting the selection to the top of the refreshed results.
+    fn set_input(&mut self, text: &str) {
+        self.filter = text.chars().collect();
+        self.filter_cursor = self.filter.len();
+        self.selection_anchor = None;
+        self.selected = 0;
+        self.scroll = 0;
     }
 
     fn esc_pressed(&mut self) {

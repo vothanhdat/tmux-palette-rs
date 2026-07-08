@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::palette::PaletteLoader;
+use crate::palettes::command_prompt::command_prompt;
 use crate::palettes::commands::commands;
 use crate::palettes::find_pane::{find_pane, inline_pane_items, render_commands_item};
 use crate::palettes::move_pane::move_pane;
@@ -217,6 +218,7 @@ fn apply_commands_overrides(def: PaletteDef) -> PaletteDef {
 pub fn load_palette(name: &str) -> Option<PaletteDef> {
     let def = match name {
         "commands" => Some(commands()),
+        "command-prompt" => Some(command_prompt()),
         "find-pane" => Some(find_pane()),
         "move-pane" => Some(move_pane()),
         "themes" => Some(themes()),
@@ -369,6 +371,7 @@ mod tests {
     #[test]
     fn loads_builtin_palettes() {
         assert!(load_palette("commands").is_some());
+        assert!(load_palette("command-prompt").is_some());
         assert!(load_palette("find-pane").is_some());
         assert!(load_palette("move-pane").is_some());
         assert!(load_palette("themes").is_some());

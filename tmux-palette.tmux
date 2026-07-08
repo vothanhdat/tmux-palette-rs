@@ -94,6 +94,7 @@ get_opt() {
 PALETTE_KEY="$(get_opt @palette-key 'C-Space')"
 FIND_PANE_KEY="$(get_opt @palette-find-pane-key '')"
 MOVE_PANE_KEY="$(get_opt @palette-move-pane-key '')"
+COMMAND_PROMPT_KEY="$(get_opt @palette-command-prompt-key '')"
 
 # Keys bind in the root table (press them directly) by default. Set
 # `@palette-prefix on` to bind them in the prefix table instead, so they fire
@@ -118,4 +119,12 @@ fi
 
 if [ -n "$MOVE_PANE_KEY" ]; then
   palette_bind "$MOVE_PANE_KEY" run-shell "$BIN move-pane"
+fi
+
+# The command-prompt palette replaces tmux's built-in `prefix + :` prompt, which
+# lives in the prefix table — so bind it there regardless of @palette-prefix
+# (a root-table `:` would hijack the literal key everywhere). Set e.g.
+# `@palette-command-prompt-key :` to override the default command prompt.
+if [ -n "$COMMAND_PROMPT_KEY" ]; then
+  tmux bind-key "$COMMAND_PROMPT_KEY" run-shell "$BIN command-prompt"
 fi

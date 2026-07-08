@@ -24,7 +24,7 @@ fn encode_action(action: &Action) -> Option<String> {
                 std::env::var("TMUX_PALETTE_BIN").unwrap_or_else(|_| "tmux-palette".to_string());
             Some(format!("tmux:run-shell -b '{} {}'", bin, name))
         }
-        Action::Run(_) | Action::Apply(_) => None,
+        Action::Run(_) | Action::Apply(_) | Action::Fill(_) => None,
     }
 }
 

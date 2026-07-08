@@ -33,6 +33,9 @@ pub enum Action {
     Run(RunFn),
     /// Runs in-process WITHOUT closing the popup, then navigates back.
     Apply(RunFn),
+    /// Replaces the search input with the given text (command completion) and
+    /// keeps the palette open — never dispatches or closes.
+    Fill(String),
 }
 
 pub type RunFn = Rc<dyn Fn(&ActionContext)>;
