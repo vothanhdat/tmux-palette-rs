@@ -31,6 +31,10 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
   the same fuzzy matcher) without first opening *Find Pane*. They stay hidden
   until you type, so the resting palette is unchanged. Search matches the pane
   title, session/window, running command, detected agent, and path.
+- **Pane preview** — *Find Pane* puts the tree on the left and the highlighted
+  pane's live screen on the right, so two `bash` panes are told apart without
+  switching to either. The panel drops away when the popup is too small to hold
+  both columns; set `"preview": false` in `sizing.json` to turn it off.
 - **Command prompt** — a drop-in replacement for tmux's `prefix + :`: the
   `command-prompt` palette lets you type any tmux command and run it. Every tmux
   command (pulled live from `tmux list-commands`) is searchable by name and
@@ -206,7 +210,8 @@ for "New Window", `cs` for "Choose Session", `sh` for "Split Horizontal".
 **Jump to a pane**: start typing and matching panes appear inline — by title,
 session/window, running command, agent, or path (e.g. type a project name or
 `nvim`). Pick one to switch straight to it. The dedicated **Find Pane** entry
-still opens the full session/window/pane tree.
+still opens the full session/window/pane tree, with a preview of the highlighted
+pane's screen beside it.
 
 ## How it works (the trick)
 
@@ -235,7 +240,8 @@ original**, so the upstream docs apply:
 - `theme.json` — `{ "name": "tokyo-night" }` or a full/partial color override
 - `themes/<slug>.json` — custom themes (appear in the switcher)
 - `palettes/<name>.json` — brand-new palettes; bind a key to their name
-- `sizing.json` — popup dimensions, borders, mobile width, ESC behavior
+- `sizing.json` — popup dimensions, borders, mobile width, ESC behavior, and
+  `"preview"` (set `false` to drop the Find Pane preview panel)
 - `shortcuts.json` — custom shortcut labels
 - `aliases.json` — extra visible alias chips
 
@@ -290,6 +296,13 @@ terminal's own colorscheme. See the bundled `terminal` theme.
   matches; and once you've typed a full command name its arguments expand
   (optional/required, with descriptions) and stay expanded while you type them —
   none of which the original had.
+- *Find Pane* previews the highlighted pane's live screen in a right-hand panel
+  (the original listed panes without showing their contents).
+- Private-use glyphs — the nerd-font icons the palette and most shell prompts use
+  — are measured as one cell, matching what terminals draw. The original's width
+  table treated `U+F000..U+F8FF` as double-width, one hex digit off from
+  `wcwidth`'s CJK Compatibility Ideographs range, which tore any row containing
+  an icon.
 
 ## Project layout
 

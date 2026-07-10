@@ -313,28 +313,73 @@ pub fn compose_search(
     )
 }
 
-fn render_list_row<F: Fn(&Row, bool) -> String>(
-    row: &Row,
+/// Cells the gutter between the list and the preview occupies: space, rule, space.
+const GUTTER_W: i64 = 3;
+/// A list narrower than this loses the tree structure the panes are drawn with.
+const MIN_LIST_W: i64 = 28;
+/// A preview narrower than this shows too little of a line to be worth reading.
+const MIN_PREVIEW_W: i64 = 24;
+/// Below this the preview is all chrome and no content — see `PreviewCtx.height`.
+const MIN_PREVIEW_H: i64 = 7;
+
+/// Split the body between the list and a preview column, or `None` when the
+/// popup is too small to carry both and the list should keep the whole width.
+pub fn split_body(body_width: i64, body_height: i64) -> Option<(i64, i64)> {
+    if body_height < MIN_PREVIEW_H {
+        return None;
+    }
+    let list_w = (((body_width - GUTTER_W) * 45) / 100).max(MIN_LIST_W);
+    let preview_w = body_width - GUTTER_W - list_w;
+    (preview_w >= MIN_PREVIEW_W).then_some((list_w, preview_w))
+}
+
+/// The pre-rendered right-hand column, one entry per visible body row.
+pub struct PreviewCol<'a> {
+    pub lines: &'a [String],
+    pub width: i64,
+}
+
+/// One body line: the list column on its row background, then — when a preview
+/// is shown — a gutter and the preview column, both always on the panel
+/// background so the selection bar stops at the list's edge.
+fn body_line(
+    content: &str,
     is_selected: bool,
-    body_width: i64,
+    list_width: i64,
     pad_x: i64,
     colors: &Colors,
-    render_row: &F,
+    preview: Option<(&str, i64)>,
 ) -> String {
     let row_bg = if is_selected {
         &colors.selected
     } else {
         &colors.panel
     };
-    let content = render_row(row, is_selected);
-    format!(
-        "{}{}{}{}{}",
+    let left = format!(
+        "{}{}{}",
         row_bg,
         spaces(pad_x),
-        truncate(&content, body_width),
-        spaces(pad_x),
-        colors.reset
-    )
+        truncate(content, list_width)
+    );
+    match preview {
+        None => format!("{}{}{}", left, spaces(pad_x), colors.reset),
+        Some((line, width)) => format!(
+            "{}{}{} {}│{}{} {}{}{}{}{}",
+            left,
+            colors.reset,
+            colors.panel,
+            colors.muted,
+            colors.reset,
+            colors.panel,
+            // Fallback fg for a preview line long enough that `truncate` cut it,
+            // dropping its own styling along with the overflow.
+            colors.fg,
+            truncate(line, width),
+            colors.panel,
+            spaces(pad_x),
+            colors.reset
+        ),
+    }
 }
 
 pub struct ListBody {
@@ -348,14 +393,21 @@ pub fn compose_list_body<F: Fn(&Row, bool) -> String>(
     scroll: usize,
     list_height: usize,
     selected: usize,
-    body_width: i64,
+    list_width: i64,
     pad_x: i64,
     colors: &Colors,
     start_y: i64,
+    preview: Option<&PreviewCol>,
     render_row: F,
 ) -> ListBody {
     let mut lines = Vec::new();
     let mut row_actions = Vec::new();
+
+    // The preview is indexed by position within the visible body, not by the
+    // scrolled row index — it describes the selection, not the rows it sits by.
+    let preview_at = |body_row: usize| {
+        preview.map(|p| (p.lines.get(body_row).map_or("", |s| s.as_str()), p.width))
+    };
 
     let end = rows.len().min(scroll + list_height);
     for i in scroll..end {
@@ -367,23 +419,26 @@ pub fn compose_list_body<F: Fn(&Row, bool) -> String>(
                 item_index: *item_index,
             });
         }
-        lines.push(render_list_row(
-            row,
+        let content = render_row(row, is_selected);
+        lines.push(body_line(
+            &content,
             is_selected,
-            body_width,
+            list_width,
             pad_x,
             colors,
-            &render_row,
+            preview_at(i - scroll),
         ));
     }
-    let blank = format!(
-        "{}{}{}",
-        colors.panel,
-        spaces(body_width + pad_x * 2),
-        colors.reset
-    );
     while lines.len() < list_height {
-        lines.push(blank.clone());
+        let body_row = lines.len();
+        lines.push(body_line(
+            "",
+            false,
+            list_width,
+            pad_x,
+            colors,
+            preview_at(body_row),
+        ));
     }
     ListBody { lines, row_actions }
 }
@@ -543,23 +598,17 @@ mod tests {
         assert!(out.contains("MUTSplit"));
     }
 
+    fn title_of(row: &Row, _: bool) -> String {
+        match row {
+            Row::Category { category } => category.clone(),
+            Row::Item { item, .. } => item.title.clone(),
+        }
+    }
+
     #[test]
     fn list_body_tracks_only_item_rows() {
         let rows = build_rows(&sample_items(), true, false);
-        let body = compose_list_body(
-            &rows,
-            0,
-            3,
-            0,
-            20,
-            1,
-            &plain_colors(),
-            10,
-            |row, _| match row {
-                Row::Category { category } => category.clone(),
-                Row::Item { item, .. } => item.title.clone(),
-            },
-        );
+        let body = compose_list_body(&rows, 0, 3, 0, 20, 1, &plain_colors(), 10, None, title_of);
         assert_eq!(body.lines.len(), 3);
         assert_eq!(
             body.row_actions,
@@ -574,5 +623,80 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn split_body_gives_the_list_45_percent() {
+        // Default popup: width 90, pad 3 -> body 84.
+        assert_eq!(split_body(84, 20), Some((36, 45)));
+        assert_eq!(36 + GUTTER_W + 45, 84);
+    }
+
+    #[test]
+    fn split_body_declines_when_the_popup_is_too_small() {
+        // Too narrow: the list floors at 28, leaving the preview under 24.
+        assert_eq!(split_body(50, 20), None);
+        // Too short: the panel would be all chrome and no pane content.
+        assert_eq!(split_body(84, MIN_PREVIEW_H - 1), None);
+        assert!(split_body(84, MIN_PREVIEW_H).is_some());
+    }
+
+    #[test]
+    fn split_body_floors_the_list_before_conceding() {
+        let (list, preview) = split_body(56, 20).unwrap();
+        assert_eq!(list, MIN_LIST_W);
+        assert_eq!(preview, 56 - GUTTER_W - MIN_LIST_W);
+        assert!(preview >= MIN_PREVIEW_W);
+    }
+
+    /// Every body line must fill the popup exactly, or the panel background
+    /// tears at the right edge.
+    #[test]
+    fn preview_lines_pad_the_body_to_full_width() {
+        let rows = build_rows(&sample_items(), false, true);
+        let preview = vec!["one".to_string(), "two".to_string()];
+        let pad_x = 3;
+        let (list_w, preview_w) = split_body(84, 20).unwrap();
+        let body = compose_list_body(
+            &rows,
+            0,
+            5,
+            0,
+            list_w,
+            pad_x,
+            &plain_colors(),
+            10,
+            Some(&PreviewCol {
+                lines: &preview,
+                width: preview_w,
+            }),
+            title_of,
+        );
+        assert_eq!(body.lines.len(), 5);
+        for line in &body.lines {
+            assert_eq!(display_width(line), pad_x + 84 + pad_x);
+        }
+        assert!(body.lines[0].contains("one"));
+        assert!(body.lines[1].contains("two"));
+        // Rows past the end of the preview still draw the gutter, so the column
+        // keeps its edge all the way down.
+        assert!(body.lines[4].contains('│'));
+    }
+
+    /// The selection bar stops at the list's edge — it must not bleed into the
+    /// preview, which always sits on the panel background.
+    #[test]
+    fn selection_highlight_stops_at_the_preview() {
+        let colors = Colors {
+            selected: "SEL".into(),
+            panel: "PANEL".into(),
+            reset: "RESET".into(),
+            ..Default::default()
+        };
+        let line = body_line("row", true, 10, 1, &colors, Some(("pv", 6)));
+        let (left, right) = line.split_once('│').unwrap();
+        assert!(left.contains("SEL"));
+        assert!(!right.contains("SEL"));
+        assert!(right.contains("pv"));
     }
 }

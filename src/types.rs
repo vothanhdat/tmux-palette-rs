@@ -139,8 +139,17 @@ pub struct Colors {
 pub struct RenderItemCtx<'a> {
     pub colors: &'a Colors,
     pub active: bool,
-    /// Body width available for the row (popup width minus horizontal padding).
+    /// Body width available for the row (popup width minus horizontal padding,
+    /// minus the preview column when one is shown).
     pub width: i64,
+}
+
+pub struct PreviewCtx<'a> {
+    pub colors: &'a Colors,
+    /// Columns available for preview content.
+    pub width: i64,
+    /// Rows available — the same height as the visible list.
+    pub height: i64,
 }
 
 /// A palette's declared theme: a bundled/user slug, or a full theme literal.
@@ -171,6 +180,12 @@ pub type FilterFn = Rc<dyn Fn(&[Item], &str) -> Vec<Item>>;
 pub type OnSelectFn = Rc<dyn Fn(Option<&Item>) -> Option<Theme>>;
 pub type InitialSelectedFn = Rc<dyn Fn(&[Item]) -> i64>;
 
+/// Builds the right-hand panel for the highlighted item, top line first, at
+/// most `height` lines. Every line must end by restoring `colors.panel`, the
+/// same contract row renderers keep with their row background — otherwise the
+/// padding that fills the line out to the column width loses the panel color.
+pub type PreviewFn = Rc<dyn Fn(Option<&Item>, &PreviewCtx) -> Vec<String>>;
+
 #[derive(Clone)]
 pub struct PaletteDef {
     pub title: Option<String>,
@@ -186,6 +201,9 @@ pub struct PaletteDef {
     pub on_select: Option<OnSelectFn>,
     /// Picks the initial highlighted item (returns an index, or -1).
     pub initial_selected: Option<InitialSelectedFn>,
+    /// Right-hand panel describing the highlighted item (Find Pane shows the
+    /// pane's live screen). `None` gives the list the full body width.
+    pub preview: Option<PreviewFn>,
 }
 
 impl Default for PaletteDef {
@@ -200,6 +218,7 @@ impl Default for PaletteDef {
             filter: None,
             on_select: None,
             initial_selected: None,
+            preview: None,
         }
     }
 }
