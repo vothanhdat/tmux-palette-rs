@@ -13,7 +13,8 @@
 //! arguments are expanded below it, one per line, tagged optional/required with
 //! a short description drawn from a bundled glossary of tmux's (very consistent)
 //! placeholder names and common flags. The resting list is grouped by topic
-//! (sessions, windows, panes, …) so all ~90 commands stay browsable.
+//! (sessions, windows, panes, …) and each row carries a nerd-font icon for its
+//! verb (new, kill, rename, …), so all ~90 commands stay browsable.
 
 use std::rc::Rc;
 
@@ -24,9 +25,96 @@ use crate::tmux::tmux;
 use crate::types::{Action, Colors, Item, ItemsSource, PaletteDef, RenderItemCtx};
 
 /// Marker for the synthetic row that runs exactly what the user typed.
-const RUN_ICON: &str = "▶";
-/// Icon for a tmux command row.
-const CMD_ICON: &str = "";
+const RUN_ICON: &str = "󰐊"; // md-play
+/// Fallback for a command whose verb is missing from the tables below — e.g. one
+/// added by a newer tmux than this build knows about.
+const CMD_ICON: &str = "󰅂"; // md-chevron_right
+
+// ---- icons -------------------------------------------------------------------
+//
+// Nerd-font (Material Design) glyphs, the same vocabulary as the main palette.
+// The resting list is grouped by topic, so the noun is already on screen in the
+// category header — the icon carries the *verb*, which is what varies within a
+// group and what you actually scan for.
+
+/// Commands whose leading verb would mislead (`copy-mode` is a mode, not a copy
+/// action) or that have no verb worth grouping on. Checked before `VERB_ICONS`.
+const NAME_ICONS: &[(&str, &str)] = &[
+    ("attach-session", "󰚥"),  // md-power_plug
+    ("break-pane", "󰘖"),      // md-arrow_expand
+    ("capture-pane", "󰄀"),    // md-camera
+    ("clock-mode", "󰅐"),      // md-clock_outline
+    ("command-prompt", "󰞷"),  // md-console_line
+    ("confirm-before", "󰋗"),  // md-help_circle
+    ("copy-mode", "󰆏"),       // md-content_copy
+    ("customize-mode", "󰒓"),  // md-cog
+    ("detach-client", "󰍃"),   // md-logout
+    ("display-menu", "󰍜"),    // md-menu
+    ("display-message", "󰍡"), // md-message
+    ("display-panes", "󰎠"),   // md-numeric
+    ("display-popup", "󱂬"),   // md-dock_window
+    ("has-session", "󰄬"),     // md-check
+    ("if-shell", "󰘬"),        // md-source_branch
+    ("join-pane", "󰃸"),       // md-call_merge
+    ("link-window", "󰌷"),     // md-link
+    ("pipe-pane", "󰟥"),       // md-pipe
+    ("rotate-window", "󰑧"),   // md-rotate_right
+    ("run-shell", "󰆍"),       // md-console
+    ("server-access", "󰢏"),   // md-shield_account
+    ("source-file", "󰈙"),     // md-file_document
+    // Escaped, not literal: this codicon lives in the BMP private-use area, which
+    // editors and pipes silently strip. The MDI glyphs above are outside it.
+    ("split-window", "\u{eb56}"), // cod-split_horizontal
+    ("start-server", "󰐊"),        // md-play
+    ("suspend-client", "󰏤"),      // md-pause
+    ("switch-client", "󰀙"),       // md-account_switch
+    ("unbind-key", "󰌐"),          // md-keyboard_off
+    ("unlink-window", "󰌸"),       // md-link_off
+    ("wait-for", "󰔟"),            // md-timer_sand
+];
+
+/// Icons keyed by a command's leading verb — tmux names are `verb-noun`, so this
+/// covers every command the pins above don't.
+const VERB_ICONS: &[(&str, &str)] = &[
+    ("bind", "󰌌"),     // md-keyboard
+    ("choose", "󰍉"),   // md-magnify
+    ("clear", "󰃢"),    // md-broom
+    ("delete", "󰆴"),   // md-delete
+    ("find", "󰍉"),     // md-magnify
+    ("kill", "󰆴"),     // md-delete
+    ("last", "󰋚"),     // md-history
+    ("list", "󰉹"),     // md-format_list_bulleted
+    ("load", "󰇚"),     // md-download
+    ("lock", "󰌾"),     // md-lock
+    ("move", "󰁁"),     // md-arrow_all
+    ("new", "󰐕"),      // md-plus
+    ("next", "󰁔"),     // md-arrow_right
+    ("paste", "󰆒"),    // md-content_paste
+    ("previous", "󰁍"), // md-arrow_left
+    ("refresh", "󰑓"),  // md-reload
+    ("rename", "󰏫"),   // md-pencil
+    ("resize", "󰩨"),   // md-resize
+    ("respawn", "󰑓"),  // md-reload
+    ("save", "󰆓"),     // md-content_save
+    ("select", "󰆣"),   // md-crosshairs
+    ("send", "󰒊"),     // md-send
+    ("set", "󰒓"),      // md-cog
+    ("show", "󰈈"),     // md-eye
+    ("swap", "󰓡"),     // md-swap_horizontal
+];
+
+/// Pick a command's icon: exact name first, then its leading verb, then a
+/// neutral marker.
+fn icon_for(name: &str) -> &'static str {
+    if let Some((_, icon)) = NAME_ICONS.iter().find(|(n, _)| *n == name) {
+        return icon;
+    }
+    let verb = name.split('-').next().unwrap_or("");
+    VERB_ICONS
+        .iter()
+        .find(|(v, _)| *v == verb)
+        .map_or(CMD_ICON, |(_, icon)| *icon)
+}
 
 // ---- categories --------------------------------------------------------------
 
@@ -328,7 +416,7 @@ fn parse_command_line(line: &str) -> Option<Item> {
     };
 
     Some(Item {
-        icon: Some(CMD_ICON.to_string()),
+        icon: Some(icon_for(name).to_string()),
         title: name.to_string(),
         description: if usage.is_empty() {
             None
@@ -618,6 +706,55 @@ mod tests {
         assert_eq!(category_for("display-popup"), "Display & Prompts");
         assert_eq!(category_for("choose-tree"), "Display & Prompts");
         assert_eq!(category_for("run-shell"), "Server & Misc");
+    }
+
+    /// Every command `tmux list-commands` prints (tmux 3.7).
+    #[rustfmt::skip]
+    const ALL_COMMANDS: &[&str] = &[
+        "attach-session","bind-key","break-pane","capture-pane","choose-buffer","choose-client",
+        "choose-tree","clear-history","clear-prompt-history","clock-mode","command-prompt",
+        "confirm-before","copy-mode","customize-mode","delete-buffer","detach-client","display-menu",
+        "display-message","display-panes","display-popup","find-window","has-session","if-shell",
+        "join-pane","kill-pane","kill-server","kill-session","kill-window","last-pane","last-window",
+        "link-window","list-buffers","list-clients","list-commands","list-keys","list-panes",
+        "list-sessions","list-windows","load-buffer","lock-client","lock-server","lock-session",
+        "move-pane","move-window","new-pane","new-session","new-window","next-layout","next-window",
+        "paste-buffer","pipe-pane","previous-layout","previous-window","refresh-client",
+        "rename-session","rename-window","resize-pane","resize-window","respawn-pane",
+        "respawn-window","rotate-window","run-shell","save-buffer","select-layout","select-pane",
+        "select-window","send-keys","send-prefix","server-access","set-buffer","set-environment",
+        "set-hook","set-option","set-window-option","show-buffer","show-environment","show-hooks",
+        "show-messages","show-options","show-prompt-history","show-window-options","source-file",
+        "split-window","start-server","suspend-client","swap-pane","swap-window","switch-client",
+        "unbind-key","unlink-window","wait-for",
+    ];
+
+    #[test]
+    fn every_tmux_command_has_a_real_icon() {
+        for name in ALL_COMMANDS {
+            let icon = icon_for(name);
+            assert_ne!(icon, CMD_ICON, "{name} fell back to the generic icon");
+            assert!(!icon.is_empty(), "{name} has an empty icon");
+        }
+    }
+
+    #[test]
+    fn icons_come_from_the_verb_unless_pinned() {
+        // Verb-keyed: the noun is already in the category header.
+        assert_eq!(icon_for("kill-pane"), icon_for("kill-window"));
+        assert_eq!(icon_for("new-session"), icon_for("new-window"));
+        assert_ne!(icon_for("new-window"), icon_for("kill-window"));
+        // Pinned names win over their (misleading) leading verb.
+        assert_eq!(icon_for("copy-mode"), "󰆏");
+        assert_ne!(icon_for("set-option"), icon_for("source-file"));
+        // An unknown future command still renders something.
+        assert_eq!(icon_for("teleport-pane"), CMD_ICON);
+    }
+
+    #[test]
+    fn built_items_carry_their_icon() {
+        let item = parse_command_line("kill-pane (killp) [-a] [-t target-pane]").unwrap();
+        assert_eq!(item.icon.as_deref(), Some(icon_for("kill-pane")));
     }
 
     #[test]

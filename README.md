@@ -34,7 +34,8 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
 - **Command prompt** — a drop-in replacement for tmux's `prefix + :`: the
   `command-prompt` palette lets you type any tmux command and run it. Every tmux
   command (pulled live from `tmux list-commands`) is searchable by name and
-  alias, grouped by topic (sessions, windows, panes, …) for browsing. **Tab**
+  alias, grouped by topic (sessions, windows, panes, …) and icon-tagged by verb
+  (new, kill, rename, …) for browsing. **Tab**
   completes a command into the prompt and cycles through the matches
   (**Shift-Tab** goes back); Enter runs a no-arg command immediately or completes
   one that takes arguments. Once you've typed a complete command name, its
@@ -284,10 +285,11 @@ terminal's own colorscheme. See the bundled `terminal` theme.
   dedicated sub-palette).
 - A new `command-prompt` palette replaces tmux's `prefix + :` prompt: type any
   tmux command to run it, with every command from `tmux list-commands` searchable
-  as a suggestion and grouped by topic for browsing. Selecting one runs it or
-  completes it into the prompt; Tab cycles through matches; and once you've typed
-  a full command name its arguments expand (optional/required, with descriptions)
-  and stay expanded while you type them — none of which the original had.
+  as a suggestion, grouped by topic and icon-tagged by verb for browsing.
+  Selecting one runs it or completes it into the prompt; Tab cycles through
+  matches; and once you've typed a full command name its arguments expand
+  (optional/required, with descriptions) and stay expanded while you type them —
+  none of which the original had.
 
 ## Project layout
 
