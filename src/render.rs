@@ -1,7 +1,12 @@
 //! Row composition + ANSI styling — port of `src/render.ts`.
 
-use crate::text::{char_width, display_width, truncate};
+use crate::text::{char_width, clip, display_width, truncate};
 use crate::types::{Colors, Item};
+
+/// Cells a description needs before it is worth showing: the ` - ` separator
+/// plus enough letters to say something. Below this the row drops the
+/// description rather than render a lone ellipsis.
+const MIN_DESC_W: i64 = 12;
 
 fn spaces(n: i64) -> String {
     " ".repeat(n.max(0) as usize)
@@ -109,14 +114,23 @@ fn alias_chip(item: &Item, colors: &Colors, row_bg: &str) -> (String, i64) {
     }
 }
 
-fn description_fragment(item: &Item, colors: &Colors, row_bg: &str) -> (String, i64) {
-    match &item.description {
-        Some(d) if !d.is_empty() => (
-            format!("{} - {}{}{}", colors.muted, d, colors.reset, row_bg),
-            3 + len(d),
-        ),
-        _ => (String::new(), 0),
+/// The dim ` - <description>` tail, clipped to the cells the rest of the row
+/// left over and dropped entirely when there are too few. Without the budget an
+/// overlong description pushes the row past the popup width, and `truncate`'s cut
+/// path then strips the ANSI off the *whole* row, not just the overflow.
+fn description_fragment(item: &Item, colors: &Colors, row_bg: &str, budget: i64) -> (String, i64) {
+    let Some(d) = item.description.as_deref().filter(|d| !d.is_empty()) else {
+        return (String::new(), 0);
+    };
+    if budget < MIN_DESC_W {
+        return (String::new(), 0);
     }
+    let text = clip(d, budget - 3);
+    let width = 3 + display_width(&text);
+    (
+        format!("{} - {}{}{}", colors.muted, text, colors.reset, row_bg),
+        width,
+    )
 }
 
 fn shortcut_fragment(item: &Item, colors: &Colors, active: bool, row_bg: &str) -> (String, String) {
@@ -200,19 +214,22 @@ pub fn render_item_styled(
     let title_styled = format!("{}{}{}{}", title_style, item.title, colors.reset, row_bg);
 
     let (chip_styled, chip_w) = alias_chip(item, colors, row_bg);
-    let (desc_styled, desc_w) = description_fragment(item, colors, row_bg);
     let (sc_styled, sc_text) = shortcut_fragment(item, colors, active, row_bg);
+
+    let icon_glyph_w = icon_glyph
+        .as_deref()
+        .map_or(1, |g| g.chars().next().map_or(1, char_width));
+    let head_w = 1 + 1 + icon_glyph_w + 2 + display_width(&item.title) + chip_w;
+    // The description gets what the fixed parts of the row leave, less the one
+    // cell that always separates it from the shortcut column.
+    let desc_budget = body_width - head_w - len(&sc_text) - 1;
+    let (desc_styled, desc_w) = description_fragment(item, colors, row_bg, desc_budget);
 
     let left_styled = format!(
         "{} {}  {}{}{}",
         marker, icon, title_styled, chip_styled, desc_styled
     );
-    let icon_glyph_w = icon_glyph
-        .as_deref()
-        .map_or(1, |g| g.chars().next().map_or(1, char_width));
-    let left_plain_w = 1 + 1 + icon_glyph_w + 2 + display_width(&item.title) + chip_w + desc_w;
-
-    let gap = (body_width - left_plain_w - len(&sc_text)).max(1);
+    let gap = (body_width - head_w - desc_w - len(&sc_text)).max(1);
     format!("{}{}{}", left_styled, spaces(gap), sc_styled)
 }
 
@@ -487,6 +504,49 @@ mod tests {
 
     fn plain_colors() -> Colors {
         Colors::default()
+    }
+
+    fn described(title: &str, description: &str) -> Item {
+        Item {
+            title: title.into(),
+            description: Some(description.into()),
+            action: Action::Shell(":".into()),
+            ..Default::default()
+        }
+    }
+
+    /// An overlong description used to push the row past the popup width, and
+    /// `body_line`'s `truncate` then stripped the ANSI off the whole row. Clipping
+    /// it here keeps the row exactly one body wide, so that cut never happens.
+    #[test]
+    fn a_long_description_is_clipped_before_it_can_tear_the_row() {
+        let colors = Colors {
+            muted: "\x1b[2m".into(),
+            reset: "\x1b[0m".into(),
+            ..Default::default()
+        };
+        let item = described("new-pane", "create a floating pane, wherever you like");
+        let row = render_default_item(&item, &colors, false, 40);
+        assert_eq!(display_width(&row), 40);
+        assert!(row.contains('…'));
+        assert!(row.contains("\x1b[2m"), "styling was stripped: {row:?}");
+    }
+
+    #[test]
+    fn a_narrow_row_drops_the_description_rather_than_show_a_stub() {
+        let item = described("new-pane", "create a floating pane");
+        let row = render_default_item(&item, &plain_colors(), false, 16);
+        assert!(!row.contains(" - "), "kept a useless stub: {row:?}");
+        assert!(row.contains("new-pane"));
+        assert_eq!(display_width(&row), 16);
+    }
+
+    #[test]
+    fn a_description_that_fits_is_left_whole() {
+        let item = described("kill-pane", "close a pane");
+        let row = render_default_item(&item, &plain_colors(), false, 60);
+        assert!(row.contains(" - close a pane"));
+        assert_eq!(display_width(&row), 60);
     }
 
     #[test]
