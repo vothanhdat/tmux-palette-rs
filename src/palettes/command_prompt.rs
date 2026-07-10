@@ -2,19 +2,22 @@
 //! command prompt.
 //!
 //! The command list is pulled live from `tmux list-commands`, so *every* tmux
-//! command is searchable (name, alias, and argument syntax). Selecting a command
-//! runs it immediately when it needs no arguments, or completes `<name> ` into
-//! the input when it takes arguments. Tab cycles through the matches (see the
-//! palette loop), and a synthetic "Run: <what you typed>" row always dispatches
-//! the typed line via the after-popup trick that keeps interactive prompts fed.
+//! command is searchable by name and alias. Selecting a command runs it
+//! immediately when it needs no arguments, or completes `<name> ` into the input
+//! when it takes arguments. Tab cycles through the matches (see the palette
+//! loop), and a synthetic "Run: <what you typed>" row always dispatches the
+//! typed line via the after-popup trick that keeps interactive prompts fed.
 //!
-//! Once the first word is a complete command name (or alias) — i.e. you've
-//! typed `<command> …` and moved on to its parameters — that command's
-//! arguments are expanded below it, one per line, tagged optional/required with
-//! a short description drawn from a bundled glossary of tmux's (very consistent)
-//! placeholder names and common flags. The resting list is grouped by topic
-//! (sessions, windows, panes, …) and each row carries a nerd-font icon for its
-//! verb (new, kill, rename, …), so all ~90 commands stay browsable.
+//! Each row says what its command *does*, from the bundled `CMD_DESCS` table —
+//! tmux itself offers no such text, and the usage string it does offer is no
+//! substitute (`new-pane`'s runs to 269 characters). The usage rides along in
+//! `Item.data` instead, and comes into its own once the first word is a complete
+//! command name (or alias): that command's arguments are then expanded below it,
+//! one per line, tagged optional/required with a short description drawn from a
+//! bundled glossary of tmux's (very consistent) placeholder names and common
+//! flags. The resting list is grouped by topic (sessions, windows, panes, …) and
+//! each row carries a nerd-font icon for its verb (new, kill, rename, …), so all
+//! ~90 commands stay browsable.
 
 use std::rc::Rc;
 
@@ -114,6 +117,123 @@ fn icon_for(name: &str) -> &'static str {
         .iter()
         .find(|(v, _)| *v == verb)
         .map_or(CMD_ICON, |(_, icon)| *icon)
+}
+
+// ---- descriptions --------------------------------------------------------------
+
+/// What each command does, in the imperative. tmux publishes no such text —
+/// `list-commands` gives only `name (alias) usage` — so it is bundled here.
+///
+/// Kept under 40 cells: the widest command name and alias chip together take 39
+/// of the 94-cell body at the default popup width, so every row still fits with
+/// room to spare. A row that overflows is worse than one that is terse — the
+/// renderer clips it, and used to strip the whole row's styling doing so.
+///
+/// `join-pane` and `move-pane` read alike because they *are* alike: identical
+/// usage, and joining within one window works for both. Describing them
+/// differently would imply a distinction tmux does not make.
+#[rustfmt::skip]
+const CMD_DESCS: &[(&str, &str)] = &[
+    ("attach-session",       "attach to a session"),
+    ("bind-key",             "bind a key to a command"),
+    ("break-pane",           "move a pane out into its own window"),
+    ("capture-pane",         "copy the pane's screen to a buffer"),
+    ("choose-buffer",        "browse the paste buffers"),
+    ("choose-client",        "browse the attached clients"),
+    ("choose-tree",          "browse sessions, windows and panes"),
+    ("clear-history",        "clear the pane's scrollback"),
+    ("clear-prompt-history", "clear the command prompt history"),
+    ("clock-mode",           "show a clock in the pane"),
+    ("command-prompt",       "prompt for a tmux command"),
+    ("confirm-before",       "ask before running a command"),
+    ("copy-mode",            "enter copy mode to scroll and select"),
+    ("customize-mode",       "browse and edit options interactively"),
+    ("delete-buffer",        "delete a paste buffer"),
+    ("detach-client",        "detach a client from its session"),
+    ("display-menu",         "show a menu of commands"),
+    ("display-message",      "show a message in the status line"),
+    ("display-panes",        "show pane numbers to pick one"),
+    ("display-popup",        "run a command in a popup window"),
+    ("find-window",          "search windows by name or content"),
+    ("has-session",          "check whether a session exists"),
+    ("if-shell",             "run a command if a shell test passes"),
+    ("join-pane",            "move a pane in beside another pane"),
+    ("kill-pane",            "close a pane"),
+    ("kill-server",          "stop the server and all sessions"),
+    ("kill-session",         "destroy a session and its windows"),
+    ("kill-window",          "close a window and its panes"),
+    ("last-pane",            "focus the previously active pane"),
+    ("last-window",          "switch back to the last window"),
+    ("link-window",          "link a window into another session"),
+    ("list-buffers",         "list the paste buffers"),
+    ("list-clients",         "list clients attached to a session"),
+    ("list-commands",        "list every tmux command"),
+    ("list-keys",            "list the key bindings"),
+    ("list-panes",           "list panes in a window or session"),
+    ("list-sessions",        "list the server's sessions"),
+    ("list-windows",         "list a session's windows"),
+    ("load-buffer",          "load a buffer from a file"),
+    ("lock-client",          "lock a single client"),
+    ("lock-server",          "lock every client"),
+    ("lock-session",         "lock every client of a session"),
+    ("move-pane",            "move a pane in beside another pane"),
+    ("move-window",          "move a window to another index"),
+    ("new-pane",             "create a floating pane"),
+    ("new-session",          "create a session"),
+    ("new-window",           "create a window"),
+    ("next-layout",          "cycle to the next layout"),
+    ("next-window",          "switch to the next window"),
+    ("paste-buffer",         "paste a buffer into the pane"),
+    ("pipe-pane",            "pipe the pane's output to a command"),
+    ("previous-layout",      "cycle to the previous layout"),
+    ("previous-window",      "switch to the previous window"),
+    ("refresh-client",       "redraw a client"),
+    ("rename-session",       "rename a session"),
+    ("rename-window",        "rename a window"),
+    ("resize-pane",          "resize a pane"),
+    ("resize-window",        "resize a window"),
+    ("respawn-pane",         "restart the pane's command"),
+    ("respawn-window",       "restart the window's command"),
+    ("rotate-window",        "rotate the panes within the window"),
+    ("run-shell",            "run a shell command"),
+    ("save-buffer",          "write a buffer to a file"),
+    ("select-layout",        "apply a pane layout"),
+    ("select-pane",          "focus a pane"),
+    ("select-window",        "switch to a window"),
+    ("send-keys",            "send keys to a pane as if typed"),
+    ("send-prefix",          "send the prefix key to the pane"),
+    ("server-access",        "grant or revoke another user's access"),
+    ("set-buffer",           "set a paste buffer's contents"),
+    ("set-environment",      "set an environment variable"),
+    ("set-hook",             "run a command when an event fires"),
+    ("set-option",           "set a session or server option"),
+    ("set-window-option",    "set a window option"),
+    ("show-buffer",          "print a buffer's contents"),
+    ("show-environment",     "show the environment"),
+    ("show-hooks",           "show the hooks that are set"),
+    ("show-messages",        "show the server's message log"),
+    ("show-options",         "show option values"),
+    ("show-prompt-history",  "show the command prompt history"),
+    ("show-window-options",  "show window option values"),
+    ("source-file",          "run commands from a file"),
+    ("split-window",         "split the pane in two"),
+    ("start-server",         "start the tmux server"),
+    ("suspend-client",       "suspend a client to the shell"),
+    ("swap-pane",            "exchange two panes"),
+    ("swap-window",          "exchange two windows"),
+    ("switch-client",        "point a client at another session"),
+    ("unbind-key",           "remove a key binding"),
+    ("unlink-window",        "remove a linked window"),
+    ("wait-for",             "block or signal on a channel"),
+];
+
+/// `None` for a command a newer tmux added that this build has never heard of;
+/// such a row falls back to showing its usage, as every row once did.
+fn desc_for(name: &str) -> Option<&'static str> {
+    CMD_DESCS
+        .binary_search_by_key(&name, |(n, _)| n)
+        .ok()
+        .map(|i| CMD_DESCS[i].1)
 }
 
 // ---- categories --------------------------------------------------------------
@@ -388,6 +508,22 @@ fn parse_usage(usage: &str) -> Vec<HelpParam> {
 
 // ---- items --------------------------------------------------------------------
 
+/// A command's raw usage string, carried in `Item.data` rather than on the row.
+/// It is what the argument help is parsed from, but it runs to 269 characters
+/// for `new-pane` — far past the row — so the row shows the description instead.
+struct CommandMeta {
+    usage: String,
+}
+
+/// The usage string stashed on a command item, or `""` for a row that carries
+/// none (the synthetic "Run:" row, or a help row).
+fn usage_of(item: &Item) -> &str {
+    item.data
+        .as_ref()
+        .and_then(|d| d.downcast_ref::<CommandMeta>())
+        .map_or("", |m| m.usage.as_str())
+}
+
 /// Parse one `tmux list-commands` line: `name [(alias)] <usage...>`.
 fn parse_command_line(line: &str) -> Option<Item> {
     let line = line.trim();
@@ -418,16 +554,17 @@ fn parse_command_line(line: &str) -> Option<Item> {
     Some(Item {
         icon: Some(icon_for(name).to_string()),
         title: name.to_string(),
-        description: if usage.is_empty() {
-            None
-        } else {
-            Some(usage.to_string())
-        },
+        description: desc_for(name)
+            .map(str::to_string)
+            .or_else(|| (!usage.is_empty()).then(|| usage.to_string())),
         aliases: alias.map(|a| vec![a]),
         action,
         category: Some(category_for(name).to_string()),
         // Tab completes the command name into the input, ready for arguments.
         complete: Some(format!("{} ", name)),
+        data: Some(Rc::new(CommandMeta {
+            usage: usage.to_string(),
+        })),
         ..Default::default()
     })
 }
@@ -468,10 +605,12 @@ fn help_item(p: &HelpParam) -> Item {
     }
 }
 
-/// Rank commands by name + alias only. Matching against the usage text (the
-/// description) or topic (the category) would make short queries subsequence-
-/// match far too many commands — e.g. `rename-window` loosely matching
-/// `respawn-window`, or `copy` matching everything filed under "Copy & Buffers".
+/// Rank commands by name + alias only. Matching against the description or the
+/// topic (the category) would make short queries subsequence-match far too many
+/// commands — e.g. `rename-window` loosely matching `respawn-window`, or `copy`
+/// matching everything filed under "Copy & Buffers". Searching the descriptions
+/// would be genuinely useful (`close` finding the `kill-*` commands), but wants
+/// a boundary-anchored match rather than the subsequence one, so it stays out.
 fn match_commands(items: &[Item], query: &str) -> Vec<Item> {
     let stripped: Vec<Item> = items
         .iter()
@@ -498,17 +637,17 @@ fn command_named(item: &Item, head: &str) -> bool {
 
 /// Filter: always offer a "Run: <query>" row on top. Once the first word is a
 /// complete command name (you've typed `<command>` and are onto its
-/// parameters), show that command — keeping its usage line for reference — and
-/// expand its arguments as help rows, which stay put while you type the params.
-/// Otherwise fuzzy-rank the command list by name so a partial word just narrows
-/// the choices without prematurely committing to one.
+/// parameters), show that command — description and all — and expand its
+/// arguments as help rows, which stay put while you type the params. Otherwise
+/// fuzzy-rank the command list by name so a partial word just narrows the
+/// choices without prematurely committing to one.
 fn filter_commands(items: &[Item], query: &str) -> Vec<Item> {
     let mut out = Vec::new();
     out.push(run_typed_item(query));
 
     let head = query.split_whitespace().next().unwrap_or("");
     if let Some(cmd) = items.iter().find(|it| command_named(it, head)) {
-        let params = parse_usage(cmd.description.as_deref().unwrap_or(""));
+        let params = parse_usage(usage_of(cmd));
         out.push(cmd.clone());
         out.extend(params.iter().map(help_item));
         return out;
@@ -648,8 +787,10 @@ mod tests {
         let vis = filter_commands(&items, "rename-window");
         assert_eq!(vis[0].title, "Run: rename-window");
         assert_eq!(vis[1].title, "rename-window");
-        // The usage line is kept as reference while typing parameters.
-        assert!(vis[1].description.is_some());
+        // The command keeps its description while you type parameters; the usage
+        // it was parsed from rides in `data`, not on the row.
+        assert_eq!(vis[1].description.as_deref(), Some("rename a window"));
+        assert_eq!(usage_of(&vis[1]), "[-t target-window] new-name");
         // Help rows follow, non-selectable, carrying HelpParam data.
         assert!(vis.len() >= 4);
         assert_eq!(vis[2].selectable, Some(false));
@@ -797,5 +938,74 @@ mod tests {
         let items = vec![parse_command_line("kill-pane [-t target-pane]").unwrap()];
         let vis = filter_commands(&items, "new-session -s work");
         assert!(matches!(&vis[0].action, Action::Tmux(c) if c == "new-session -s work"));
+    }
+
+    // ---- descriptions ----------------------------------------------------------
+
+    /// `desc_for` binary-searches, so the table has to stay ordered — and the
+    /// entries have to be commands tmux actually has.
+    #[test]
+    fn description_table_is_sorted_and_names_real_commands() {
+        let names: Vec<&str> = CMD_DESCS.iter().map(|(n, _)| *n).collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted, "CMD_DESCS must be sorted by command name");
+        for name in &names {
+            assert!(ALL_COMMANDS.contains(name), "{name} is not a tmux command");
+        }
+    }
+
+    #[test]
+    fn every_tmux_command_has_a_description() {
+        for name in ALL_COMMANDS {
+            assert!(desc_for(name).is_some(), "{name} has no description");
+        }
+    }
+
+    /// The row must fit the 94-cell body of a default 100-column popup, or the
+    /// renderer clips it. The prefix is marker + icon + two spaces + name +
+    /// alias chip; the description then costs ` - ` plus its own width.
+    #[test]
+    fn every_row_fits_the_default_popup() {
+        for (name, desc) in CMD_DESCS {
+            assert!(
+                display_width(desc) < 40,
+                "{name}: description is {} cells",
+                display_width(desc)
+            );
+        }
+        // Worst case in practice: the longest name paired with its alias chip.
+        let widest = "clear-prompt-history";
+        let prefix = 1 + 1 + 1 + 2; // marker, gap, icon, two gaps
+        let chip = 4 + display_width("clearphist");
+        let desc = desc_for(widest).unwrap();
+        let row = prefix + display_width(widest) + chip + 3 + display_width(desc);
+        assert!(row <= 94, "{widest} renders {row} cells wide");
+    }
+
+    #[test]
+    fn rows_show_prose_and_keep_the_usage_for_the_help_block() {
+        let item = parse_command_line("kill-pane (killp) [-a] [-t target-pane]").unwrap();
+        assert_eq!(item.description.as_deref(), Some("close a pane"));
+        assert_eq!(usage_of(&item), "[-a] [-t target-pane]");
+    }
+
+    /// A command from a tmux newer than this build still says something useful —
+    /// its usage, exactly as every row showed before `CMD_DESCS` existed.
+    #[test]
+    fn unknown_commands_fall_back_to_their_usage() {
+        let item =
+            parse_command_line("teleport-pane (telep) [-t target-pane] destination").unwrap();
+        assert_eq!(
+            item.description.as_deref(),
+            Some("[-t target-pane] destination")
+        );
+    }
+
+    /// `join-pane` and `move-pane` are the same command in tmux — identical
+    /// usage, and joining within one window works for both.
+    #[test]
+    fn join_and_move_pane_read_alike() {
+        assert_eq!(desc_for("join-pane"), desc_for("move-pane"));
     }
 }

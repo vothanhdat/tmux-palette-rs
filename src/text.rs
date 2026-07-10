@@ -69,14 +69,16 @@ pub fn display_width(s: &str) -> i64 {
     strip(s).chars().map(char_width).sum()
 }
 
-/// Pad with spaces to `width`, or truncate with a trailing `…`. When the string
-/// already fits, ANSI styling is preserved; when it must be cut, styling is
-/// stripped (matching the original — the cut path operates on plain text).
-pub fn truncate(s: &str, width: i64) -> String {
-    let current = display_width(s);
-    if current <= width {
-        let pad = (width - current).max(0) as usize;
-        return format!("{}{}", s, " ".repeat(pad));
+/// Cut to at most `width` cells, appending `…` when anything was dropped. A
+/// string that already fits comes back untouched, ANSI and all; one that must be
+/// cut comes back stripped, since the cut could otherwise land mid-escape.
+///
+/// Nothing is padded — callers that need a fixed-width field want [`truncate`].
+/// Callers composing a row from several fragments want this, so that one overlong
+/// fragment doesn't strip the styling off the whole row.
+pub fn clip(s: &str, width: i64) -> String {
+    if display_width(s) <= width {
+        return s.to_string();
     }
     let plain = strip(s);
     let mut result = String::new();
@@ -89,8 +91,17 @@ pub fn truncate(s: &str, width: i64) -> String {
         result.push(c);
         used = next;
     }
-    let pad = (width - used - 1).max(0) as usize;
-    format!("{}…{}", result, " ".repeat(pad))
+    result.push('…');
+    result
+}
+
+/// Pad with spaces to `width`, or truncate with a trailing `…`. When the string
+/// already fits, ANSI styling is preserved; when it must be cut, styling is
+/// stripped (matching the original — the cut path operates on plain text).
+pub fn truncate(s: &str, width: i64) -> String {
+    let cut = clip(s, width);
+    let pad = (width - display_width(&cut)).max(0) as usize;
+    format!("{}{}", cut, " ".repeat(pad))
 }
 
 /// Initials of a multi-word title (`Split Horizontal` → `sh`), used as an
@@ -155,6 +166,18 @@ mod tests {
     #[test]
     fn does_not_split_a_wide_glyph() {
         assert_eq!(truncate("ab😀cd", 5), "ab😀…");
+    }
+
+    #[test]
+    fn clip_leaves_a_fitting_string_alone() {
+        assert_eq!(clip("tmux", 6), "tmux");
+        assert_eq!(clip("\x1b[31mred\x1b[0m", 3), "\x1b[31mred\x1b[0m");
+    }
+
+    #[test]
+    fn clip_cuts_without_padding() {
+        assert_eq!(clip("tmux-palette", 6), "tmux-…");
+        assert_eq!(display_width(&clip("tmux-palette", 6)), 6);
     }
 
     #[test]

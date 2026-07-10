@@ -38,8 +38,9 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
 - **Command prompt** — a drop-in replacement for tmux's `prefix + :`: the
   `command-prompt` palette lets you type any tmux command and run it. Every tmux
   command (pulled live from `tmux list-commands`) is searchable by name and
-  alias, grouped by topic (sessions, windows, panes, …) and icon-tagged by verb
-  (new, kill, rename, …) for browsing. **Tab**
+  alias, grouped by topic (sessions, windows, panes, …), icon-tagged by verb
+  (new, kill, rename, …), and captioned with what it actually does — so
+  `break-pane`, `join-pane` and `move-pane` are told apart at a glance. **Tab**
   completes a command into the prompt and cycles through the matches
   (**Shift-Tab** goes back); Enter runs a no-arg command immediately or completes
   one that takes arguments. Once you've typed a complete command name, its
@@ -296,6 +297,11 @@ terminal's own colorscheme. See the bundled `terminal` theme.
   matches; and once you've typed a full command name its arguments expand
   (optional/required, with descriptions) and stay expanded while you type them —
   none of which the original had.
+- Each command in that palette carries a one-line description of what it does.
+  tmux publishes no such text — `list-commands` gives only `name (alias) usage` —
+  so the palette bundles one per command. The usage string it *does* give is no
+  substitute: `new-pane`'s runs to 269 characters, and 26 of the 91 commands have
+  one too long for the row.
 - *Find Pane* previews the highlighted pane's live screen in a right-hand panel
   (the original listed panes without showing their contents).
 - Private-use glyphs — the nerd-font icons the palette and most shell prompts use
