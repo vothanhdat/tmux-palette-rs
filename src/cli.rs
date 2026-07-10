@@ -277,8 +277,8 @@ pub struct Measurement {
     pub border_style: String,
 }
 
-const DEFAULT_WIDTH: i64 = 90;
-const DEFAULT_MAX_HEIGHT: i64 = 28;
+const DEFAULT_WIDTH: i64 = 100;
+const DEFAULT_MAX_HEIGHT: i64 = 32;
 const DEFAULT_PAD_X: i64 = 3;
 const DEFAULT_MOBILE_WIDTH: i64 = 80;
 /// Floor for a palette with a preview panel: sized by item count alone, a
@@ -388,9 +388,9 @@ mod tests {
     fn measure_includes_chrome_and_categories() {
         let def = commands();
         let m = measure(&def, 200, 50);
-        // commands has 31 items across 6 categories; rows capped at maxHeight 28.
-        assert_eq!(m.rows, 28);
-        assert_eq!(m.width, 90);
+        // commands has 31 items across 6 categories; rows capped at maxHeight.
+        assert_eq!(m.rows, DEFAULT_MAX_HEIGHT);
+        assert_eq!(m.width, DEFAULT_WIDTH);
         assert_eq!(m.pad_x, 3);
         assert_eq!(m.border, "none");
     }
