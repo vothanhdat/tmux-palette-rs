@@ -1,13 +1,18 @@
 //! `find-pane` palette — tree of sessions/windows/panes — port of
 //! `src/palettes/find-pane.ts`.
+//!
+//! The tree sits in the left column; a preview panel on the right shows the
+//! highlighted pane's live screen, so you can tell two `bash` panes apart
+//! without switching to them.
 
 use std::any::Any;
 use std::rc::Rc;
 
 use crate::fuzzy::multi_fuzzy_score;
 use crate::render::{render_default_item, render_item_styled};
+use crate::text::char_width;
 use crate::tmux::{tmux, tmux_quote};
-use crate::types::{Action, Colors, Item, ItemsSource, PaletteDef, RenderItemCtx};
+use crate::types::{Action, Colors, Item, ItemsSource, PaletteDef, PreviewCtx, RenderItemCtx};
 
 const SPINNER: &[char] = &[
     '*', '✳', '⠂', '⠐', '⠁', '⠉', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏',
@@ -543,6 +548,71 @@ fn render_item_impl(item: &Item, ctx: &RenderItemCtx) -> String {
     }
 }
 
+// ---- preview panel -----------------------------------------------------------
+
+/// Preview lines spent on the pane's identity before its screen starts: target
+/// + command, path, rule.
+const PREVIEW_CHROME: i64 = 3;
+
+/// The pane's visible screen as plain text, one line per pane row.
+fn capture_pane(target: &str) -> String {
+    tmux(&["capture-pane", "-p", "-t", target])
+}
+
+/// The bottom `height` rows of a captured screen, trailing blank rows dropped.
+/// The bottom is where the prompt and the newest output are, which identifies a
+/// pane far better than its top — an idle shell is all blank up there.
+fn screen_tail(capture: &str, height: i64) -> Vec<&str> {
+    let mut lines: Vec<&str> = capture.split('\n').collect();
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
+    let skip = (lines.len() as i64 - height.max(0)).max(0) as usize;
+    lines.split_off(skip)
+}
+
+/// Drop characters that occupy no cell, so the line's width matches what the
+/// renderer measures when it truncates.
+fn sanitize(line: &str) -> String {
+    line.chars().filter(|c| char_width(*c) > 0).collect()
+}
+
+fn preview_lines(p: &Pane, capture: &str, ctx: &PreviewCtx) -> Vec<String> {
+    let c = ctx.colors;
+    let bg = &c.panel;
+    // Every line restores the panel background, per the `PreviewFn` contract.
+    let mut out = vec![
+        format!(
+            "{}{}{}{}{}  {}{}{}{}",
+            c.accent, c.bold, p.target, c.reset, bg, c.muted, p.command, c.reset, bg
+        ),
+        format!("{}{}{}{}", c.muted, shorten_path(&p.path), c.reset, bg),
+        format!(
+            "{}{}{}{}",
+            c.muted,
+            "─".repeat(ctx.width.max(0) as usize),
+            c.reset,
+            bg
+        ),
+    ];
+    for line in screen_tail(capture, ctx.height - PREVIEW_CHROME) {
+        out.push(format!("{}{}{}{}", c.fg, sanitize(line), c.reset, bg));
+    }
+    out
+}
+
+/// Right-hand panel for the highlighted row. Sessions and windows are not
+/// selectable in this tree, so in practice the highlight is always a pane.
+fn preview_impl(item: Option<&Item>, ctx: &PreviewCtx) -> Vec<String> {
+    let Some(ItemData::Pane { pane, .. }) = item
+        .and_then(|i| i.data.as_ref())
+        .and_then(|d| d.downcast_ref::<ItemData>())
+    else {
+        return Vec::new();
+    };
+    preview_lines(pane, &capture_pane(&pane.target), ctx)
+}
+
 fn filter_tree(items: &[Item], query: &str) -> Vec<Item> {
     let parts: Vec<String> = query
         .to_lowercase()
@@ -630,6 +700,7 @@ pub fn find_pane() -> PaletteDef {
         render_item: Some(Rc::new(render_item_impl)),
         filter: Some(Rc::new(filter_tree)),
         initial_selected: Some(Rc::new(initial_selected)),
+        preview: Some(Rc::new(preview_impl)),
         ..Default::default()
     }
 }
@@ -710,6 +781,88 @@ mod tests {
         let row_other = render_commands_item(&items[1], &mk_ctx());
         assert!(row_other.contains("MUTED"));
         assert!(!row_other.contains("ACCENT"));
+    }
+
+    fn preview_colors() -> Colors {
+        Colors {
+            fg: "FG".into(),
+            muted: "MUT".into(),
+            accent: "ACC".into(),
+            panel: "PANEL".into(),
+            reset: "RESET".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn screen_tail_drops_trailing_blanks_and_keeps_the_bottom() {
+        // An idle shell: prompt near the top, blank rows below it.
+        assert_eq!(
+            screen_tail("$ ls\nfoo\n$ \n\n\n", 4),
+            vec!["$ ls", "foo", "$ "]
+        );
+        // A full screen: the newest output is at the bottom, so that is what shows.
+        assert_eq!(screen_tail("a\nb\nc\nd", 2), vec!["c", "d"]);
+        // Degenerate heights never panic or over-take.
+        assert_eq!(screen_tail("a\nb", 0), Vec::<&str>::new());
+        assert_eq!(screen_tail("a\nb", -3), Vec::<&str>::new());
+        assert_eq!(screen_tail("\n\n", 5), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn sanitize_keeps_the_cell_count_truthful() {
+        // Control characters occupy no cell; leaving them in would desync the
+        // width the renderer measures from the width the terminal draws.
+        assert_eq!(sanitize("a\x07b\x00c"), "abc");
+        assert_eq!(sanitize("plain text"), "plain text");
+        assert_eq!(sanitize("héllo 😀"), "héllo 😀");
+    }
+
+    #[test]
+    fn preview_leads_with_the_pane_identity_then_its_screen() {
+        let p = parse_pane_line(
+            "main\t1\t0\teditor\tnvim\tnvim\t/tmp/proj\t1\t1",
+            "main:1.0",
+        )
+        .unwrap();
+        let colors = preview_colors();
+        let ctx = PreviewCtx {
+            colors: &colors,
+            width: 20,
+            height: 6,
+        };
+        let lines = preview_lines(&p, "one\ntwo\nthree\n\n\n", &ctx);
+
+        // target + command, path, rule, then `height - chrome` content rows.
+        assert!(lines[0].contains("main:1.0"));
+        assert!(lines[0].contains("nvim"));
+        assert!(lines[1].contains("/tmp/proj"));
+        // The rule spans the column exactly (`─` is one cell wide).
+        assert_eq!(lines[2].matches('─').count(), 20);
+        assert_eq!(lines.len(), PREVIEW_CHROME as usize + 3);
+        assert!(lines[3].contains("one"));
+        assert!(lines[5].contains("three"));
+
+        // Every line restores the panel background for the padding that follows.
+        for line in &lines {
+            assert!(
+                line.ends_with("PANEL"),
+                "line does not restore panel: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn preview_is_empty_for_a_non_pane_row() {
+        let colors = preview_colors();
+        let ctx = PreviewCtx {
+            colors: &colors,
+            width: 20,
+            height: 10,
+        };
+        let session = session_item("main", &[], "main");
+        assert!(preview_impl(Some(&session), &ctx).is_empty());
+        assert!(preview_impl(None, &ctx).is_empty());
     }
 
     #[test]

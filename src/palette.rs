@@ -12,11 +12,12 @@ use crate::fuzzy::default_filter;
 use crate::raw::{self, is_interactive, read_stdin, terminal_size, write_stdout, RawMode};
 use crate::render::{
     build_rows, compose_footer, compose_header, compose_list_body, compose_search,
-    first_selectable, is_selectable, render_category, render_default_item, step, Row, RowAction,
+    first_selectable, is_selectable, render_category, render_default_item, split_body, step,
+    PreviewCol, Row, RowAction,
 };
 use crate::theme::{cursor_tint, make_colors, popup_flags, resolve_active_theme};
 use crate::types::{
-    Action, ActionContext, Colors, Item, PaletteDef, PopupAction, RenderItemCtx, Theme,
+    Action, ActionContext, Colors, Item, PaletteDef, PopupAction, PreviewCtx, RenderItemCtx, Theme,
 };
 use crate::user_config::{user_aliases, user_shortcuts, user_sizing};
 
@@ -176,6 +177,8 @@ pub struct Runner {
     stack: Vec<NavState>,
     completion: Option<Completion>,
 
+    /// Read once — `render` runs on every keystroke and must not touch the disk.
+    preview_enabled: bool,
     loader: Option<PaletteLoader>,
     raw_mode: Option<RawMode>,
 }
@@ -214,6 +217,7 @@ impl Runner {
             esc_action: None,
             stack: Vec::new(),
             completion: None,
+            preview_enabled: user_sizing().preview != Some(false),
             loader,
             raw_mode: None,
         }
@@ -343,6 +347,36 @@ impl Runner {
             x_end: header.esc_x2,
         });
 
+        // A palette with a preview gives up part of the body to it, but only
+        // when the popup is big enough that both columns stay legible.
+        let split = self
+            .current_def
+            .preview
+            .clone()
+            .filter(|_| self.preview_enabled)
+            .zip(split_body(body_width, list_height as i64));
+        let preview_lines: Vec<String> = match &split {
+            Some((build, (_, preview_width))) => build(
+                vis.get(self.selected),
+                &PreviewCtx {
+                    colors: &colors,
+                    width: *preview_width,
+                    height: list_height as i64,
+                },
+            ),
+            None => Vec::new(),
+        };
+        let (list_width, preview_col) = match &split {
+            Some((_, (list_width, preview_width))) => (
+                *list_width,
+                Some(PreviewCol {
+                    lines: &preview_lines,
+                    width: *preview_width,
+                }),
+            ),
+            None => (body_width, None),
+        };
+
         let render_item = self.current_def.render_item.clone();
         let body = {
             let colors_ref = &colors;
@@ -360,10 +394,10 @@ impl Runner {
                             &RenderItemCtx {
                                 colors: colors_ref,
                                 active: is_selected,
-                                width: body_width,
+                                width: list_width,
                             },
                         ),
-                        None => render_default_item(item, colors_ref, is_selected, body_width),
+                        None => render_default_item(item, colors_ref, is_selected, list_width),
                     },
                 }
             };
@@ -372,10 +406,11 @@ impl Runner {
                 scroll,
                 list_height,
                 self.selected,
-                body_width,
+                list_width,
                 pad_x,
                 &colors,
                 if bordered { 4 } else { 5 },
+                preview_col.as_ref(),
                 render_row,
             )
         };

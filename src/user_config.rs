@@ -158,6 +158,9 @@ pub struct Sizing {
     pub popup_pad_y: Option<i64>,
     /// ESC in nested palettes: "back" (pop one level) or "exit".
     pub esc: Option<String>,
+    /// Right-hand preview panel (Find Pane). Defaults to on; the panel is
+    /// dropped anyway when the popup is too small to hold both columns.
+    pub preview: Option<bool>,
 }
 
 pub fn user_sizing() -> Sizing {

@@ -281,6 +281,9 @@ const DEFAULT_WIDTH: i64 = 90;
 const DEFAULT_MAX_HEIGHT: i64 = 28;
 const DEFAULT_PAD_X: i64 = 3;
 const DEFAULT_MOBILE_WIDTH: i64 = 80;
+/// Floor for a palette with a preview panel: sized by item count alone, a
+/// two-pane session would open a popup too short to show any pane content.
+const PREVIEW_MIN_ROWS: i64 = 20;
 
 /// Compute the popup geometry the palette wants (defaults + sizing.json),
 /// triggering fullscreen mobile mode when the client is narrow.
@@ -313,7 +316,10 @@ pub fn measure(def: &PaletteDef, cw: i64, ch: i64) -> Measurement {
         .unwrap_or_else(|| format!("fg={},bg=default", tmux_color(&theme.accent)));
 
     // chrome: top pad + header + search + spacer + footer spacer + footer + bottom pad = 7
-    let desired = items.len() as i64 + cats + 7;
+    let mut desired = items.len() as i64 + cats + 7;
+    if def.preview.is_some() {
+        desired = desired.max(PREVIEW_MIN_ROWS);
+    }
     let mut rows = desired.min(max_height);
     let mut final_width = width;
     let mut final_pad_x = pad_x;

@@ -4,12 +4,17 @@
 //! many columns a string occupies *after* ANSI escapes are stripped and wide
 //! (CJK / emoji) glyphs are counted as two cells.
 
+/// The `wcwidth` double-width table. Note `0xf900..=0xfaff` (CJK Compatibility
+/// Ideographs) rather than the private use area just below it: nerd-font icons
+/// live in the PUA and terminals draw them one cell wide, so measuring them as
+/// two tears the row — visible wherever captured pane content carries a
+/// prompt glyph.
 const WIDE_RANGES: &[(u32, u32)] = &[
     (0x1100, 0x115f),
     (0x2329, 0x232a),
     (0x2e80, 0xa4cf),
     (0xac00, 0xd7a3),
-    (0xf000, 0xf8ff),
+    (0xf900, 0xfaff),
     (0xfe10, 0xfe19),
     (0xfe30, 0xfe6f),
     (0xff00, 0xff60),
@@ -115,6 +120,21 @@ mod tests {
         assert_eq!(char_width('a'), 1);
         assert_eq!(char_width('😀'), 2);
         assert_eq!(display_width("a😀b"), 4);
+        assert_eq!(char_width('你'), 2);
+        // CJK Compatibility Ideographs.
+        assert_eq!(char_width('\u{f900}'), 2);
+    }
+
+    /// Nerd-font icons sit in the private use areas; terminals give them one
+    /// cell, and so must we — the palette's own icons and any captured pane
+    /// content are full of them.
+    #[test]
+    fn private_use_glyphs_take_one_cell() {
+        assert_eq!(char_width('\u{e000}'), 1); // BMP PUA, first
+        assert_eq!(char_width('\u{eb56}'), 1); // codicon
+        assert_eq!(char_width('\u{efcc}'), 1); // Font Awesome
+        assert_eq!(char_width('\u{f8ff}'), 1); // BMP PUA, last
+        assert_eq!(char_width('\u{f0349}'), 1); // Material Design (plane 15)
     }
 
     #[test]
