@@ -12,7 +12,9 @@
 use std::fs;
 use std::process::Command;
 
-use tmux_palette::cli::{apply_category, load_palette, make_loader, measure, with_inline_panes};
+use tmux_palette::cli::{
+    apply_category, load_palette, make_loader, measure, resolve_dim, with_inline_panes,
+};
 use tmux_palette::palette::run_palette;
 
 fn main() {
@@ -70,7 +72,7 @@ fn measure_mode(name: &str, category: Option<&str>, args: &[String]) {
     if let Some(cat) = category.filter(|c| !c.is_empty()) {
         def = apply_category(def, cat);
     }
-    let m = measure(&def, cw, ch);
+    let m = measure(&def, cw, ch, width_override(cw));
     println!(
         "{}\t{}\t{}\t{}\t{}\t{}",
         m.rows, m.width, m.pad_x, m.border, m.body_style, m.border_style
@@ -91,6 +93,29 @@ fn tmux_num(fmt: &str) -> Option<i64> {
         .trim()
         .parse::<i64>()
         .ok()
+}
+
+/// A global tmux option's value (e.g. `@palette-width`), or `None` when it is
+/// unset or empty. Read live, so `set -g @palette-width …` takes effect without
+/// reloading the plugin.
+fn tmux_opt(name: &str) -> Option<String> {
+    let out = Command::new("tmux")
+        .args(["show-option", "-gqv", name])
+        .output()
+        .ok()?;
+    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!v.is_empty()).then_some(v)
+}
+
+/// The popup width the user asked for, resolved to columns against the client
+/// width `cw`. `TMUX_PALETTE_WIDTH` (the env escape hatch) wins over the
+/// `@palette-width` tmux option; either may be absolute columns or a percent.
+/// `None` leaves the palette's own sizing untouched.
+fn width_override(cw: i64) -> Option<i64> {
+    std::env::var("TMUX_PALETTE_WIDTH")
+        .ok()
+        .or_else(|| tmux_opt("@palette-width"))
+        .and_then(|s| resolve_dim(&s, cw))
 }
 
 fn launcher_mode(name: &str, category: Option<&str>, args: &[String]) {
@@ -117,7 +142,9 @@ fn launcher_mode(name: &str, category: Option<&str>, args: &[String]) {
     if let Some(cat) = category.filter(|c| !c.is_empty()) {
         def = apply_category(def, cat);
     }
-    let m = measure(&def, cw, ch);
+    // The width the user asked for (@palette-width / env) flows in here, so it
+    // rides the cap and fullscreen rules below and mobile mode can still win.
+    let m = measure(&def, cw, ch, width_override(cw));
 
     // Cap by client size, leaving breathing room (mobile mode uses full dims).
     let max_h = ch - 2;
@@ -127,17 +154,13 @@ fn launcher_mode(name: &str, category: Option<&str>, args: &[String]) {
         h = ch;
         w = cw;
     }
+    // Height stays as-measured (it grows with the item count); this env hatch
+    // pins it when set. Width is already resolved through `measure` above.
     if let Some(v) = std::env::var("TMUX_PALETTE_HEIGHT")
         .ok()
         .and_then(|s| s.parse::<i64>().ok())
     {
         h = v;
-    }
-    if let Some(v) = std::env::var("TMUX_PALETTE_WIDTH")
-        .ok()
-        .and_then(|s| s.parse::<i64>().ok())
-    {
-        w = v;
     }
 
     let bordered = m.border != "none";

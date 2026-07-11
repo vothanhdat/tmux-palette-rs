@@ -171,6 +171,7 @@ set -g @palette-find-pane-key 'M-f'       # optional, no binding by default
 set -g @palette-move-pane-key 'M-m'       # optional, no binding by default
 set -g @palette-command-prompt-key ':'    # optional, replaces prefix + : (always prefix table)
 set -g @palette-prefix 'off'              # optional, 'on' = bind behind the prefix
+set -g @palette-width '60%'               # optional, popup width: percent of the client, or absolute columns
 ```
 
 Then `prefix + I`. TPM clones the default branch (`master`), which ships the
@@ -186,6 +187,14 @@ so they fire as `<prefix> <key>`:
 set -g @palette-prefix 'on'
 set -g @palette-key 'p'                   # now: prefix + p
 ```
+
+**Popup width.** `@palette-width` sets how wide every palette opens. A trailing
+`%` is a fraction of the client (`60%` tracks the terminal as it resizes); a bare
+number is absolute columns (`120`). It applies to all palettes alike, overrides
+`sizing.json`'s `width`, and is read live — `set -g @palette-width …` takes
+effect on the next open, no reload needed. Height is left to grow with the item
+count, so each palette is only as tall as it needs to be. On a client narrower
+than the mobile threshold the popup still goes fullscreen regardless.
 
 ### Install the binary on PATH (alternative)
 

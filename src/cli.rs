@@ -285,9 +285,26 @@ const DEFAULT_MOBILE_WIDTH: i64 = 80;
 /// two-pane session would open a popup too short to show any pane content.
 const PREVIEW_MIN_ROWS: i64 = 20;
 
-/// Compute the popup geometry the palette wants (defaults + sizing.json),
-/// triggering fullscreen mobile mode when the client is narrow.
-pub fn measure(def: &PaletteDef, cw: i64, ch: i64) -> Measurement {
+/// Resolve a width spec against the client width: a trailing `%` is a percent of
+/// `client` (so `"60%"` → 60% of the client), otherwise it is absolute columns
+/// (`"120"` → 120). `None` for empty or malformed input, or a non-positive
+/// result. This is what lets `@palette-width` and `TMUX_PALETTE_WIDTH` accept
+/// either form.
+pub fn resolve_dim(spec: &str, client: i64) -> Option<i64> {
+    let s = spec.trim();
+    if let Some(pct) = s.strip_suffix('%') {
+        let p: i64 = pct.trim().parse().ok()?;
+        Some((client * p / 100).max(1)).filter(|_| p > 0)
+    } else {
+        s.parse::<i64>().ok().filter(|&n| n > 0)
+    }
+}
+
+/// Compute the popup geometry the palette wants, from — in precedence order —
+/// `width_override` (`@palette-width` / the env escape hatch, already resolved to
+/// columns), `sizing.json`, then the built-in default. A narrow client still
+/// forces fullscreen mobile mode, overriding all three.
+pub fn measure(def: &PaletteDef, cw: i64, ch: i64, width_override: Option<i64>) -> Measurement {
     let items = def.resolve_items();
     let grouped = def.grouped != Some(false);
     let cats = if grouped {
@@ -304,7 +321,7 @@ pub fn measure(def: &PaletteDef, cw: i64, ch: i64) -> Measurement {
 
     let sizing = user_sizing();
     let max_height = sizing.max_height.unwrap_or(DEFAULT_MAX_HEIGHT);
-    let width = sizing.width.unwrap_or(DEFAULT_WIDTH);
+    let width = width_override.or(sizing.width).unwrap_or(DEFAULT_WIDTH);
     let pad_x = sizing.pad_x.unwrap_or(DEFAULT_PAD_X);
     let mobile_width = sizing.mobile_width.unwrap_or(DEFAULT_MOBILE_WIDTH);
     let border = sizing.border.unwrap_or_else(|| "none".to_string());
@@ -387,7 +404,7 @@ mod tests {
     #[test]
     fn measure_includes_chrome_and_categories() {
         let def = commands();
-        let m = measure(&def, 200, 50);
+        let m = measure(&def, 200, 50, None);
         // commands has 31 items across 6 categories; rows capped at maxHeight.
         assert_eq!(m.rows, DEFAULT_MAX_HEIGHT);
         assert_eq!(m.width, DEFAULT_WIDTH);
@@ -398,9 +415,43 @@ mod tests {
     #[test]
     fn measure_triggers_mobile_fullscreen() {
         let def = commands();
-        let m = measure(&def, 50, 40);
+        let m = measure(&def, 50, 40, None);
         assert_eq!(m.width, 50);
         assert_eq!(m.pad_x, 1);
         assert!(m.rows >= 40);
+    }
+
+    #[test]
+    fn width_override_beats_the_default() {
+        let def = commands();
+        let m = measure(&def, 200, 50, Some(120));
+        assert_eq!(m.width, 120);
+    }
+
+    #[test]
+    fn mobile_fullscreen_still_wins_over_a_width_override() {
+        let def = commands();
+        // 60% of a 70-col client is 42, but 70 is below the mobile threshold
+        // (80), so it goes fullscreen regardless of the override.
+        let m = measure(&def, 70, 40, resolve_dim("60%", 70));
+        assert_eq!(m.width, 70);
+        assert_eq!(m.pad_x, 1);
+    }
+
+    #[test]
+    fn resolve_dim_reads_absolute_and_percent() {
+        assert_eq!(resolve_dim("120", 200), Some(120));
+        assert_eq!(resolve_dim("60%", 200), Some(120));
+        assert_eq!(resolve_dim(" 50% ", 80), Some(40));
+        assert_eq!(resolve_dim("100%", 90), Some(90));
+    }
+
+    #[test]
+    fn resolve_dim_rejects_junk_and_nonpositive() {
+        assert_eq!(resolve_dim("", 200), None);
+        assert_eq!(resolve_dim("wide", 200), None);
+        assert_eq!(resolve_dim("0", 200), None);
+        assert_eq!(resolve_dim("0%", 200), None);
+        assert_eq!(resolve_dim("-10", 200), None);
     }
 }

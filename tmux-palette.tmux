@@ -96,6 +96,10 @@ FIND_PANE_KEY="$(get_opt @palette-find-pane-key '')"
 MOVE_PANE_KEY="$(get_opt @palette-move-pane-key '')"
 COMMAND_PROMPT_KEY="$(get_opt @palette-command-prompt-key '')"
 
+# @palette-width (popup width: '60%' of the client, or absolute columns like
+# '120') is read by the binary itself at open time, not here — so no binding
+# needs it and `set -g @palette-width …` applies without reloading the plugin.
+
 # Keys bind in the root table (press them directly) by default. Set
 # `@palette-prefix on` to bind them in the prefix table instead, so they fire
 # as `<prefix> <key>` (e.g. `set -g @palette-prefix on` + `@palette-key p`).
