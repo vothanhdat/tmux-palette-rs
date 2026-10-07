@@ -172,6 +172,7 @@ set -g @palette-move-pane-key 'M-m'       # optional, no binding by default
 set -g @palette-command-prompt-key ':'    # optional, replaces prefix + : (always prefix table)
 set -g @palette-prefix 'off'              # optional, 'on' = bind behind the prefix
 set -g @palette-width '60%'               # optional, popup width: percent of the client, or absolute columns
+set -g @palette-preview-size '80%'        # optional, Find Pane size: percent of the client, or '90%x70%'
 ```
 
 Then `prefix + I`. TPM clones the default branch (`master`), which ships the
@@ -193,8 +194,20 @@ set -g @palette-key 'p'                   # now: prefix + p
 number is absolute columns (`120`). It applies to all palettes alike, overrides
 `sizing.json`'s `width`, and is read live — `set -g @palette-width …` takes
 effect on the next open, no reload needed. Height is left to grow with the item
-count, so each palette is only as tall as it needs to be. On a client narrower
-than the mobile threshold the popup still goes fullscreen regardless.
+count, so each palette is only as tall as it needs to be. *Find Pane* is the
+exception: its preview is another pane's screen, so it opens at 80% of the client
+in both directions (never smaller than the other palettes) — `@palette-width` and
+`sizing.json`'s `width`/`maxHeight` still override that. Picked from the main
+palette, it reopens in a popup of that size, and Esc brings the main palette back.
+Resize it from the keyboard while it is open — **Alt+=** / **Alt+Up** grow it and
+**Alt+-** / **Alt+Down** shrink it, 5% of the client a step (40%–100%). tmux
+can't resize an open popup, so each step briefly closes and reopens it, keeping
+your search and highlighted pane. The size lands in `@palette-preview-size`, so
+it sticks until tmux restarts; set that option yourself (`85%`, or `90%x70%` for
+width x height) to choose the size Find Pane starts at — it overrides the width
+and height settings above.
+On a client narrower than the mobile threshold the popup still goes fullscreen
+regardless.
 
 ### Install the binary on PATH (alternative)
 
@@ -211,6 +224,8 @@ cargo install --path .
 - **Enter** to run the selected command.
 - **Tab / Shift-Tab** (in the `command-prompt` palette) complete a command into
   the prompt and cycle forward/backward through the matches.
+- **Alt+= / Alt+-** (or **Alt+Up / Alt+Down**) in *Find Pane* grow/shrink the
+  popup — see [Popup width](#via-tpm-tmux-plugin-manager) above.
 - **Esc** to cancel (or pop back one level in a nested palette).
 - **Mouse** works too — click rows, scroll the wheel, click `esc`.
 

@@ -118,6 +118,17 @@ fn nav_delta(key: &str) -> Option<i64> {
     }
 }
 
+/// Alt+= / Alt+Up grow a preview palette's popup (+1), Alt+- / Alt+Down shrink
+/// it (-1). Alt+Shift+= (`+`) grows too, and terminals that send Alt as a
+/// leading ESC before the arrow are covered alongside the xterm modifier form.
+fn resize_dir(key: &str) -> Option<i64> {
+    match key {
+        "\x1b=" | "\x1b+" | "\x1b[1;3A" | "\x1b\x1b[A" => Some(1),
+        "\x1b-" | "\x1b[1;3B" | "\x1b\x1b[B" => Some(-1),
+        _ => None,
+    }
+}
+
 fn parse_mouse_event(key: &str) -> Option<(i64, i64, i64, char)> {
     let rest = key.strip_prefix("\x1b[<")?;
     let end = rest.find(['m', 'M'])?;
@@ -179,6 +190,9 @@ pub struct Runner {
 
     /// Read once — `render` runs on every keystroke and must not touch the disk.
     preview_enabled: bool,
+    /// The palette this popup was relaunched from (see `relaunch`), reopened on
+    /// Esc in place of the in-process stack frame it doesn't have.
+    back: Option<String>,
     loader: Option<PaletteLoader>,
     raw_mode: Option<RawMode>,
 }
@@ -194,9 +208,21 @@ impl Runner {
             .empty_text
             .clone()
             .unwrap_or_else(|| "No results".to_string());
-        let selected = match &def.initial_selected {
-            Some(f) => f(&items).max(0) as usize,
-            None => 0,
+        // A popup reopened by a resize key picks up the search and highlight of
+        // the one it replaced (see `request_resize`).
+        let filter: Vec<char> = std::env::var("TMUX_PALETTE_QUERY")
+            .unwrap_or_default()
+            .chars()
+            .collect();
+        let selected = match std::env::var("TMUX_PALETTE_SELECTED")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+        {
+            Some(i) => i,
+            None => match &def.initial_selected {
+                Some(f) => f(&items).max(0) as usize,
+                None => 0,
+            },
         };
         Runner {
             current_def: def,
@@ -208,8 +234,8 @@ impl Runner {
             grouped,
             empty_text,
             cmd_file: std::env::var("TMUX_PALETTE_CMD").ok(),
-            filter: Vec::new(),
-            filter_cursor: 0,
+            filter_cursor: filter.len(),
+            filter,
             selection_anchor: None,
             selected,
             scroll: 0,
@@ -218,6 +244,9 @@ impl Runner {
             stack: Vec::new(),
             completion: None,
             preview_enabled: user_sizing().preview != Some(false),
+            back: std::env::var("TMUX_PALETTE_BACK")
+                .ok()
+                .filter(|s| !s.is_empty()),
             loader,
             raw_mode: None,
         }
@@ -249,6 +278,11 @@ impl Runner {
         let Some(next) = loader(name) else {
             return;
         };
+        // A preview wants a bigger popup than this one, and tmux can't resize an
+        // open popup — so have the launcher reopen `name` at its own size.
+        if next.preview.is_some() && self.preview_enabled && self.cmd_file.is_some() {
+            self.relaunch(name);
+        }
         self.stack.push(NavState {
             def: self.current_def.clone(),
             name: self.current_name.clone(),
@@ -528,6 +562,41 @@ impl Runner {
         )
     }
 
+    /// Close this popup and have the launcher reopen it a step bigger (`dir` >
+    /// 0) or smaller — tmux can't resize an open popup — carrying the highlight
+    /// and search over. Only a preview palette at the root of its own popup
+    /// resizes; anywhere else the keys do nothing.
+    fn request_resize(&mut self, dir: i64) {
+        let resizable =
+            self.current_def.preview.is_some() && self.preview_enabled && self.stack.is_empty();
+        let Some(file) = self.cmd_file.clone().filter(|_| resizable) else {
+            return;
+        };
+        self.cleanup();
+        let query: String = self.filter.iter().collect();
+        let _ = std::fs::write(
+            file,
+            format!("resize:{}\n{}\n{}", dir, self.selected, query),
+        );
+        process::exit(0);
+    }
+
+    /// Close this popup and have the launcher open `name` in one measured for
+    /// it, passing this palette along so Esc there comes back here.
+    fn relaunch(&mut self, name: &str) -> ! {
+        self.cleanup();
+        if let Some(file) = self.cmd_file.clone() {
+            let bin =
+                std::env::var("TMUX_PALETTE_BIN").unwrap_or_else(|_| "tmux-palette".to_string());
+            let cmd = format!(
+                "tmux:run-shell -b '{} {} --back={}'",
+                bin, name, self.current_name
+            );
+            let _ = std::fs::write(file, cmd);
+        }
+        process::exit(0);
+    }
+
     fn dispatch_popup_action(&mut self, action: &PopupAction) -> ! {
         self.cleanup();
         if let Some(file) = self.cmd_file.clone() {
@@ -632,6 +701,13 @@ impl Runner {
         if esc_mode == "back" && !self.stack.is_empty() {
             self.navigate_back();
             return;
+        }
+        if esc_mode == "back" {
+            if let Some(back) = self.back.clone() {
+                self.cleanup();
+                dispatch_to_file(&Action::Palette(back), self.cmd_file.as_deref());
+                process::exit(0);
+            }
         }
         self.exit_now();
     }
@@ -887,6 +963,10 @@ impl Runner {
             self.cycle_completion(-1, vis);
             return;
         }
+        if let Some(dir) = resize_dir(key) {
+            self.request_resize(dir);
+            return;
+        }
         // Any other key ends an in-progress Tab-completion cycle.
         self.completion = None;
         if self.handle_enter_or_exit(key, vis) {
@@ -970,6 +1050,20 @@ mod tests {
         assert_eq!(nav_delta("\x1b[5~"), Some(-10));
         assert_eq!(nav_delta("\x1b[6~"), Some(10));
         assert_eq!(nav_delta("x"), None);
+    }
+
+    #[test]
+    fn resize_keys_map_to_directions() {
+        assert_eq!(resize_dir("\x1b="), Some(1));
+        assert_eq!(resize_dir("\x1b[1;3A"), Some(1));
+        assert_eq!(resize_dir("\x1b-"), Some(-1));
+        assert_eq!(resize_dir("\x1b[1;3B"), Some(-1));
+        // Plain arrows still move the highlight, Alt+Left/Right still move by
+        // word, and a bare `=` or `-` is still typed into the search.
+        assert_eq!(resize_dir("\x1b[A"), None);
+        assert_eq!(resize_dir("\x1b[1;3D"), None);
+        assert_eq!(resize_dir("="), None);
+        assert_eq!(resize_dir("-"), None);
     }
 
     #[test]
