@@ -161,6 +161,9 @@ pub struct Sizing {
     /// Right-hand preview panel (Find Pane). Defaults to on; the panel is
     /// dropped anyway when the popup is too small to hold both columns.
     pub preview: Option<bool>,
+    /// Milliseconds between live redraws of the preview panel while it is open;
+    /// 0 redraws it only when a key is pressed.
+    pub preview_refresh: Option<i64>,
 }
 
 pub fn user_sizing() -> Sizing {

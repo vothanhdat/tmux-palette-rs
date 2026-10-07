@@ -9,7 +9,9 @@ use std::rc::Rc;
 
 use crate::dispatch::dispatch_to_file;
 use crate::fuzzy::default_filter;
-use crate::raw::{self, is_interactive, read_stdin, terminal_size, write_stdout, RawMode};
+use crate::raw::{
+    self, is_interactive, read_stdin, terminal_size, wait_stdin, write_stdout, RawMode,
+};
 use crate::render::{
     build_rows, compose_footer, compose_header, compose_list_body, compose_search,
     first_selectable, is_selectable, render_category, render_default_item, split_body, step,
@@ -22,6 +24,11 @@ use crate::types::{
 use crate::user_config::{user_aliases, user_shortcuts, user_sizing};
 
 pub type PaletteLoader = Rc<dyn Fn(&str) -> Option<PaletteDef>>;
+
+/// Milliseconds between live redraws of a preview panel, unless `sizing.json`'s
+/// `previewRefresh` says otherwise: often enough to watch a pane work, while an
+/// idle one costs only a capture per tick (`refresh` writes nothing then).
+const DEFAULT_PREVIEW_REFRESH_MS: i64 = 250;
 
 struct NavState {
     def: PaletteDef,
@@ -190,6 +197,11 @@ pub struct Runner {
 
     /// Read once — `render` runs on every keystroke and must not touch the disk.
     preview_enabled: bool,
+    /// Milliseconds between live preview redraws; 0 leaves them to keystrokes.
+    preview_refresh_ms: i64,
+    /// The last frame written, so a live-preview tick that changes nothing
+    /// writes nothing.
+    last_frame: String,
     /// The palette this popup was relaunched from (see `relaunch`), reopened on
     /// Esc in place of the in-process stack frame it doesn't have.
     back: Option<String>,
@@ -199,6 +211,7 @@ pub struct Runner {
 
 impl Runner {
     fn new(def: PaletteDef, loader: Option<PaletteLoader>, initial_name: &str) -> Runner {
+        let sizing = user_sizing();
         let theme = resolve_active_theme(&def.theme);
         let colors = make_colors(&theme);
         let items = apply_user_overrides(def.resolve_items());
@@ -243,7 +256,9 @@ impl Runner {
             esc_action: None,
             stack: Vec::new(),
             completion: None,
-            preview_enabled: user_sizing().preview != Some(false),
+            preview_enabled: sizing.preview != Some(false),
+            preview_refresh_ms: sizing.preview_refresh.unwrap_or(DEFAULT_PREVIEW_REFRESH_MS),
+            last_frame: String::new(),
             back: std::env::var("TMUX_PALETTE_BACK")
                 .ok()
                 .filter(|s| !s.is_empty()),
@@ -339,6 +354,31 @@ impl Runner {
     }
 
     fn render(&mut self) {
+        let frame = self.frame();
+        write_stdout(frame.as_bytes());
+        self.last_frame = frame;
+    }
+
+    /// A live-preview tick: redraw only if the frame changed, so a pane whose
+    /// screen is still costs a capture and no output.
+    fn refresh(&mut self) {
+        let frame = self.frame();
+        if frame != self.last_frame {
+            write_stdout(frame.as_bytes());
+            self.last_frame = frame;
+        }
+    }
+
+    /// How long to wait for a key before a live-preview tick, or `None` to wait
+    /// for keys alone (no preview showing, or live updates turned off).
+    fn refresh_ms(&self) -> Option<i64> {
+        let live = self.current_def.preview.is_some() && self.preview_enabled;
+        (live && self.preview_refresh_ms > 0).then_some(self.preview_refresh_ms)
+    }
+
+    /// Lay out the whole popup as one write: header, search, list (and preview),
+    /// footer, cursor.
+    fn frame(&mut self) -> String {
         let (width, height) = terminal_size();
         let vis = self.visible();
         self.ensure_selectable(&vis);
@@ -496,7 +536,7 @@ impl Runner {
         out.push_str(&format!("\x1b[{};{}H\x1b[5 q", search_row, cursor_col));
         out.push_str(&cursor_tint(&theme));
         out.push_str("\x1b[?25h\x1b[?2026l");
-        write_stdout(out.as_bytes());
+        out
     }
 
     fn cleanup(&mut self) {
@@ -999,7 +1039,20 @@ impl Runner {
             if raw::should_exit() {
                 self.exit_now();
             }
-            match read_stdin(&mut buf) {
+            // With a live preview, wake on a timer between keys to redraw it.
+            let ready = match self.refresh_ms() {
+                Some(ms) => wait_stdin(ms),
+                None => Ok(true),
+            };
+            let read = match ready {
+                Ok(true) => read_stdin(&mut buf),
+                Ok(false) => {
+                    self.refresh();
+                    continue;
+                }
+                Err(e) => Err(e),
+            };
+            match read {
                 Ok(0) => self.exit_now(),
                 Ok(n) => {
                     let key = String::from_utf8_lossy(&buf[..n]).into_owned();
@@ -1050,6 +1103,26 @@ mod tests {
         assert_eq!(nav_delta("\x1b[5~"), Some(-10));
         assert_eq!(nav_delta("\x1b[6~"), Some(10));
         assert_eq!(nav_delta("x"), None);
+    }
+
+    #[test]
+    fn only_a_showing_live_preview_ticks() {
+        let plain = Runner::new(PaletteDef::default(), None, "plain");
+        assert_eq!(plain.refresh_ms(), None);
+
+        let previewed = PaletteDef {
+            preview: Some(Rc::new(|_: Option<&Item>, _: &PreviewCtx| Vec::new())),
+            ..Default::default()
+        };
+        let mut r = Runner::new(previewed, None, "previewed");
+        (r.preview_enabled, r.preview_refresh_ms) = (true, 250);
+        assert_eq!(r.refresh_ms(), Some(250));
+        // `"previewRefresh": 0` leaves redraws to keystrokes.
+        r.preview_refresh_ms = 0;
+        assert_eq!(r.refresh_ms(), None);
+        // `"preview": false` has no panel to keep live.
+        (r.preview_enabled, r.preview_refresh_ms) = (false, 250);
+        assert_eq!(r.refresh_ms(), None);
     }
 
     #[test]

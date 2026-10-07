@@ -33,8 +33,11 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
   title, session/window, running command, detected agent, and path.
 - **Pane preview** — *Find Pane* puts the tree on the left and the highlighted
   pane's live screen on the right, in its own colors and attributes, so two
-  `bash` panes are told apart without switching to either. The panel drops away when the popup is too small to hold
-  both columns; set `"preview": false` in `sizing.json` to turn it off.
+  `bash` panes are told apart without switching to either. It keeps updating
+  while open (every 250ms; `"previewRefresh"` in `sizing.json` sets the
+  milliseconds, `0` updates only on keypresses). The panel drops away when the
+  popup is too small to hold both columns; set `"preview": false` in
+  `sizing.json` to turn it off.
 - **Command prompt** — a drop-in replacement for tmux's `prefix + :`: the
   `command-prompt` palette lets you type any tmux command and run it. Every tmux
   command (pulled live from `tmux list-commands`) is searchable by name and
@@ -266,7 +269,9 @@ original**, so the upstream docs apply:
 - `themes/<slug>.json` — custom themes (appear in the switcher)
 - `palettes/<name>.json` — brand-new palettes; bind a key to their name
 - `sizing.json` — popup dimensions, borders, mobile width, ESC behavior, and
-  `"preview"` (set `false` to drop the Find Pane preview panel)
+  `"preview"` (set `false` to drop the Find Pane preview panel) /
+  `"previewRefresh"` (milliseconds between its live updates, `0` for keypresses
+  only)
 - `shortcuts.json` — custom shortcut labels
 - `aliases.json` — extra visible alias chips
 

@@ -144,6 +144,40 @@ pub fn read_stdin(buf: &mut [u8]) -> io::Result<usize> {
     }
 }
 
+/// Wait up to `timeout_ms` for stdin to have input: `Ok(true)` when it does,
+/// `Ok(false)` on timeout. EINTR surfaces as `ErrorKind::Interrupted`, as from
+/// `read_stdin`, so signals are handled the same way.
+pub fn wait_stdin(timeout_ms: i64) -> io::Result<bool> {
+    wait_readable(libc::STDIN_FILENO, timeout_ms)
+}
+
+/// `select(2)` rather than `poll(2)`: macOS's poll doesn't support devices, and
+/// the palette's stdin is the popup's pty.
+fn wait_readable(fd: RawFd, timeout_ms: i64) -> io::Result<bool> {
+    let ms = timeout_ms.max(0);
+    let n = unsafe {
+        let mut set: libc::fd_set = std::mem::zeroed();
+        libc::FD_ZERO(&mut set);
+        libc::FD_SET(fd, &mut set);
+        let mut tv = libc::timeval {
+            tv_sec: (ms / 1000) as libc::time_t,
+            tv_usec: ((ms % 1000) * 1000) as libc::suseconds_t,
+        };
+        libc::select(
+            fd + 1,
+            &mut set,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut tv,
+        )
+    };
+    if n < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(n > 0)
+    }
+}
+
 /// Write all bytes directly to stdout (fd 1), bypassing std's line-buffering so
 /// each frame goes out as a single contiguous write (no flicker).
 pub fn write_stdout(data: &[u8]) {
@@ -164,5 +198,32 @@ pub fn write_stdout(data: &[u8]) {
             break;
         }
         off += n as usize;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wait_readable_times_out_then_sees_input() {
+        let mut fds = [0 as libc::c_int; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        let (read_end, write_end) = (fds[0], fds[1]);
+
+        let start = std::time::Instant::now();
+        assert!(!wait_readable(read_end, 50).unwrap());
+        assert!(start.elapsed() >= std::time::Duration::from_millis(40));
+
+        assert_eq!(
+            unsafe { libc::write(write_end, b"x".as_ptr() as *const libc::c_void, 1) },
+            1
+        );
+        assert!(wait_readable(read_end, 1000).unwrap());
+
+        unsafe {
+            libc::close(read_end);
+            libc::close(write_end);
+        }
     }
 }
