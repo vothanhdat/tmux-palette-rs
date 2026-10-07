@@ -13,7 +13,8 @@ use std::fs;
 use std::process::Command;
 
 use tmux_palette::cli::{
-    apply_category, load_palette, make_loader, measure, resolve_dim, with_inline_panes,
+    apply_category, format_size_pct, load_palette, make_loader, measure, parse_size_pct, pct_of,
+    resolve_dim, step_pct, with_inline_panes,
 };
 use tmux_palette::palette::run_palette;
 
@@ -72,7 +73,7 @@ fn measure_mode(name: &str, category: Option<&str>, args: &[String]) {
     if let Some(cat) = category.filter(|c| !c.is_empty()) {
         def = apply_category(def, cat);
     }
-    let m = measure(&def, cw, ch, width_override(cw));
+    let m = measure(&def, cw, ch, width_override(cw), preview_size());
     println!(
         "{}\t{}\t{}\t{}\t{}\t{}",
         m.rows, m.width, m.pad_x, m.border, m.body_style, m.border_style
@@ -118,6 +119,41 @@ fn width_override(cw: i64) -> Option<i64> {
         .and_then(|s| resolve_dim(&s, cw))
 }
 
+/// `@palette-preview-size` as (width, height) percents, or `None` when unset or
+/// malformed. Read live, like `@palette-width`.
+fn preview_size() -> Option<(i64, i64)> {
+    tmux_opt("@palette-preview-size").and_then(|s| parse_size_pct(&s))
+}
+
+/// What the popup's palette asked for when it closed, read from the command file.
+enum Outcome {
+    /// Run `tmux <cmd>` or `sh -c <cmd>` (the `tmux:` / `shell:` prefixes).
+    Dispatch(String),
+    /// A resize key: reopen a step bigger (`dir` > 0) or smaller, restoring the
+    /// highlighted row and the search.
+    Resize {
+        dir: i64,
+        selected: String,
+        query: String,
+    },
+}
+
+fn read_outcome(content: String) -> Outcome {
+    match content.strip_prefix("resize:") {
+        // `resize:<dir>\n<selected>\n<query>` — the query last, so it may hold
+        // anything but is never split.
+        Some(rest) => {
+            let mut parts = rest.splitn(3, '\n');
+            Outcome::Resize {
+                dir: parts.next().and_then(|s| s.parse().ok()).unwrap_or(1),
+                selected: parts.next().unwrap_or("").to_string(),
+                query: parts.next().unwrap_or("").to_string(),
+            }
+        }
+        None => Outcome::Dispatch(content),
+    }
+}
+
 fn launcher_mode(name: &str, category: Option<&str>, args: &[String]) {
     if std::env::var_os("TMUX").is_none() {
         eprintln!("tmux-palette: must be run inside a tmux session");
@@ -127,9 +163,6 @@ fn launcher_mode(name: &str, category: Option<&str>, args: &[String]) {
     let self_path = std::env::current_exe()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "tmux-palette".to_string());
-
-    let ch = tmux_num("#{client_height}").unwrap_or(24);
-    let cw = tmux_num("#{client_width}").unwrap_or(80);
 
     // Ask the palette how big it wants to be (defaults + sizing.json applied).
     let mut def = match load_palette(name) {
@@ -142,66 +175,115 @@ fn launcher_mode(name: &str, category: Option<&str>, args: &[String]) {
     if let Some(cat) = category.filter(|c| !c.is_empty()) {
         def = apply_category(def, cat);
     }
-    // The width the user asked for (@palette-width / env) flows in here, so it
-    // rides the cap and fullscreen rules below and mobile mode can still win.
-    let m = measure(&def, cw, ch, width_override(cw));
 
-    // Cap by client size, leaving breathing room (mobile mode uses full dims).
-    let max_h = ch - 2;
-    let mut h = if m.rows > max_h { max_h } else { m.rows };
-    let mut w = if m.width > cw - 4 { cw - 4 } else { m.width };
-    if m.width >= cw {
-        h = ch;
-        w = cw;
-    }
-    // Height stays as-measured (it grows with the item count); this env hatch
-    // pins it when set. Width is already resolved through `measure` above.
-    if let Some(v) = std::env::var("TMUX_PALETTE_HEIGHT")
-        .ok()
-        .and_then(|s| s.parse::<i64>().ok())
-    {
-        h = v;
-    }
-
-    let bordered = m.border != "none";
-
-    // Temp file the palette writes the chosen command into.
-    let cmd_file = std::env::temp_dir().join(format!(
-        "tmux-palette-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-    let _ = fs::write(&cmd_file, b"");
-    let cmd_file = cmd_file.to_string_lossy().into_owned();
-
-    // Build the inner command: env vars + exec self with the forwarded args.
+    // `--back=<palette>`: this popup replaces that palette (a preview palette
+    // relaunched at its own size), so Esc reopens it.
+    let back = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--back="))
+        .unwrap_or("");
     let forwarded: String = args.iter().map(|a| shq(a)).collect::<Vec<_>>().join(" ");
-    let inner = format!(
-        "TMUX_PALETTE_CMD={} TMUX_PALETTE_BIN={} TMUX_PALETTE_PADX={} TMUX_PALETTE_BORDERED={} exec {} {}",
-        shq(&cmd_file),
-        shq(&self_path),
-        m.pad_x,
-        if bordered { 1 } else { 0 },
-        shq(&self_path),
-        forwarded
-    );
 
-    let mut popup = Command::new("tmux");
-    popup.arg("display-popup");
-    if bordered {
-        popup.args(["-b", &m.border, "-s", &m.body_style, "-S", &m.border_style]);
-    } else {
-        popup.args(["-B", "-s", &m.body_style]);
-    }
-    popup.args(["-w", &w.to_string(), "-h", &h.to_string(), "-E", &inner]);
-    let _ = popup.status();
+    let mut size_pct = preview_size();
+    // The highlighted row and search a resize carries into the reopened popup.
+    let (mut selected, mut query) = (String::new(), String::new());
+
+    // tmux can't resize an open popup, so a resize key closes it and this loop
+    // opens the next one at the new size.
+    let content = loop {
+        let ch = tmux_num("#{client_height}").unwrap_or(24);
+        let cw = tmux_num("#{client_width}").unwrap_or(80);
+
+        // The width the user asked for (@palette-width / env) flows in here, so
+        // it rides the cap and fullscreen rules below and mobile mode can still
+        // win.
+        let m = measure(&def, cw, ch, width_override(cw), size_pct);
+
+        // Cap by client size, leaving breathing room (mobile mode uses full dims).
+        let max_h = ch - 2;
+        let mut h = if m.rows > max_h { max_h } else { m.rows };
+        let mut w = if m.width > cw - 4 { cw - 4 } else { m.width };
+        if m.width >= cw {
+            h = ch;
+            w = cw;
+        }
+        // Height stays as-measured (it grows with the item count); this env
+        // hatch pins it when set. Width is already resolved through `measure`.
+        if let Some(v) = std::env::var("TMUX_PALETTE_HEIGHT")
+            .ok()
+            .and_then(|s| s.parse::<i64>().ok())
+        {
+            h = v;
+        }
+
+        let bordered = m.border != "none";
+
+        // Temp file the palette writes the chosen command into.
+        let cmd_file = std::env::temp_dir().join(format!(
+            "tmux-palette-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::write(&cmd_file, b"");
+        let cmd_file = cmd_file.to_string_lossy().into_owned();
+
+        // Build the inner command: env vars + exec self with the forwarded args.
+        let inner = format!(
+            "TMUX_PALETTE_CMD={} TMUX_PALETTE_BIN={} TMUX_PALETTE_PADX={} TMUX_PALETTE_BORDERED={} \
+             TMUX_PALETTE_BACK={} TMUX_PALETTE_SELECTED={} TMUX_PALETTE_QUERY={} exec {} {}",
+            shq(&cmd_file),
+            shq(&self_path),
+            m.pad_x,
+            if bordered { 1 } else { 0 },
+            shq(back),
+            shq(&selected),
+            shq(&query),
+            shq(&self_path),
+            forwarded
+        );
+
+        let mut popup = Command::new("tmux");
+        popup.arg("display-popup");
+        if bordered {
+            popup.args(["-b", &m.border, "-s", &m.body_style, "-S", &m.border_style]);
+        } else {
+            popup.args(["-B", "-s", &m.body_style]);
+        }
+        popup.args(["-w", &w.to_string(), "-h", &h.to_string(), "-E", &inner]);
+        let _ = popup.status();
+
+        let content = fs::read_to_string(&cmd_file).unwrap_or_default();
+        let _ = fs::remove_file(&cmd_file);
+        match read_outcome(content) {
+            Outcome::Resize {
+                dir,
+                selected: sel,
+                query: q,
+            } => {
+                // Step the percents this popup was opened at; with none yet,
+                // start from the size it actually had. The result is kept in
+                // @palette-preview-size so the next open starts there.
+                let (pw, ph) = size_pct.unwrap_or((pct_of(w, cw), pct_of(h, ch)));
+                let next = (step_pct(pw, dir), step_pct(ph, dir));
+                let _ = Command::new("tmux")
+                    .args([
+                        "set-option",
+                        "-g",
+                        "@palette-preview-size",
+                        &format_size_pct(next),
+                    ])
+                    .status();
+                size_pct = Some(next);
+                (selected, query) = (sel, q);
+            }
+            Outcome::Dispatch(content) => break content,
+        }
+    };
 
     // After the popup closes, run the dispatched command.
-    let content = fs::read_to_string(&cmd_file).unwrap_or_default();
-    let _ = fs::remove_file(&cmd_file);
     if let Some(rest) = content.strip_prefix("tmux:") {
         // Through a shell so `\;` separators and quoting are interpreted, like
         // the original `eval "tmux ..."`. Exit status is intentionally ignored.

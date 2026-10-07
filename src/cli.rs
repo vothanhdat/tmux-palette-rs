@@ -284,6 +284,10 @@ const DEFAULT_MOBILE_WIDTH: i64 = 80;
 /// Floor for a palette with a preview panel: sized by item count alone, a
 /// two-pane session would open a popup too short to show any pane content.
 const PREVIEW_MIN_ROWS: i64 = 20;
+/// A palette with a preview panel opens at this percent of the client in each
+/// dimension: the preview is another pane's screen, which reads best near the
+/// size it is drawn at.
+const PREVIEW_PCT: i64 = 80;
 
 /// Resolve a width spec against the client width: a trailing `%` is a percent of
 /// `client` (so `"60%"` → 60% of the client), otherwise it is absolute columns
@@ -300,11 +304,72 @@ pub fn resolve_dim(spec: &str, client: i64) -> Option<i64> {
     }
 }
 
+/// Percent of the client one press of a resize key moves a preview palette by.
+const RESIZE_STEP: i64 = 5;
+/// The resize keys shrink no further: below this the preview starts dropping
+/// away on ordinary terminals.
+const MIN_RESIZE_PCT: i64 = 40;
+
+/// Parse `@palette-preview-size` into (width, height) percents of the client:
+/// `85%` sizes both sides, `90%x70%` each (the `%` is optional). `None` for
+/// junk or a side outside 1..=100.
+pub fn parse_size_pct(spec: &str) -> Option<(i64, i64)> {
+    let pct = |s: &str| -> Option<i64> {
+        let s = s.trim();
+        let n: i64 = s.strip_suffix('%').unwrap_or(s).trim().parse().ok()?;
+        (1..=100).contains(&n).then_some(n)
+    };
+    match spec.split_once('x') {
+        Some((w, h)) => Some((pct(w)?, pct(h)?)),
+        None => pct(spec).map(|p| (p, p)),
+    }
+}
+
+/// The `@palette-preview-size` value for (width, height) percents — the short
+/// form when both sides agree, as they do unless set otherwise by hand.
+pub fn format_size_pct((w, h): (i64, i64)) -> String {
+    if w == h {
+        format!("{}%", w)
+    } else {
+        format!("{}%x{}%", w, h)
+    }
+}
+
+/// The percent of a `client`-long side that a popup side `side` cells long
+/// fills, rounded up — where the resize keys start from when the size didn't
+/// come from a percent (a floor, `@palette-width`), so the first press still
+/// moves the way it says.
+pub fn pct_of(side: i64, client: i64) -> i64 {
+    let client = client.max(1);
+    (side * 100 + client - 1) / client
+}
+
+/// The percent one resize key press moves `cur` to toward `dir` (+1 grow, -1
+/// shrink): the next multiple of `RESIZE_STEP` past it.
+pub fn step_pct(cur: i64, dir: i64) -> i64 {
+    let next = if dir > 0 {
+        (cur / RESIZE_STEP + 1) * RESIZE_STEP
+    } else {
+        ((cur + RESIZE_STEP - 1) / RESIZE_STEP - 1) * RESIZE_STEP
+    };
+    next.clamp(MIN_RESIZE_PCT, 100)
+}
+
 /// Compute the popup geometry the palette wants, from — in precedence order —
 /// `width_override` (`@palette-width` / the env escape hatch, already resolved to
 /// columns), `sizing.json`, then the built-in default. A narrow client still
-/// forces fullscreen mobile mode, overriding all three.
-pub fn measure(def: &PaletteDef, cw: i64, ch: i64, width_override: Option<i64>) -> Measurement {
+/// forces fullscreen mobile mode, overriding all three. A palette showing a
+/// preview defaults to `PREVIEW_PCT` of the client rather than to its item
+/// count, and never to less than a plain palette gets; `preview_size`
+/// (`@palette-preview-size`, which its resize keys set) pins it to those
+/// percents instead, ahead of every other width or height setting.
+pub fn measure(
+    def: &PaletteDef,
+    cw: i64,
+    ch: i64,
+    width_override: Option<i64>,
+    preview_size: Option<(i64, i64)>,
+) -> Measurement {
     let items = def.resolve_items();
     let grouped = def.grouped != Some(false);
     let cats = if grouped {
@@ -320,8 +385,23 @@ pub fn measure(def: &PaletteDef, cw: i64, ch: i64, width_override: Option<i64>) 
     };
 
     let sizing = user_sizing();
-    let max_height = sizing.max_height.unwrap_or(DEFAULT_MAX_HEIGHT);
-    let width = width_override.or(sizing.width).unwrap_or(DEFAULT_WIDTH);
+    let has_preview = def.preview.is_some() && sizing.preview != Some(false);
+    // Only an explicit `maxHeight` caps a preview palette; the launcher still
+    // keeps it inside the client.
+    let max_height = sizing
+        .max_height
+        .or((!has_preview).then_some(DEFAULT_MAX_HEIGHT));
+    // Percents need a known client; `--measure` without `--cw`/`--ch` has none.
+    let preview_size = preview_size.filter(|_| has_preview && cw > 0 && ch > 0);
+    let default_width = if has_preview {
+        (cw * PREVIEW_PCT / 100).max(DEFAULT_WIDTH)
+    } else {
+        DEFAULT_WIDTH
+    };
+    let width = match preview_size {
+        Some((pw, _)) => (cw * pw / 100).max(1),
+        None => width_override.or(sizing.width).unwrap_or(default_width),
+    };
     let pad_x = sizing.pad_x.unwrap_or(DEFAULT_PAD_X);
     let mobile_width = sizing.mobile_width.unwrap_or(DEFAULT_MOBILE_WIDTH);
     let border = sizing.border.unwrap_or_else(|| "none".to_string());
@@ -334,10 +414,13 @@ pub fn measure(def: &PaletteDef, cw: i64, ch: i64, width_override: Option<i64>) 
 
     // chrome: top pad + header + search + spacer + footer spacer + footer + bottom pad = 7
     let mut desired = items.len() as i64 + cats + 7;
-    if def.preview.is_some() {
-        desired = desired.max(PREVIEW_MIN_ROWS);
+    if has_preview {
+        desired = desired.max(PREVIEW_MIN_ROWS).max(ch * PREVIEW_PCT / 100);
     }
-    let mut rows = desired.min(max_height);
+    let mut rows = match preview_size {
+        Some((_, ph)) => (ch * ph / 100).max(1),
+        None => max_height.map_or(desired, |m| desired.min(m)),
+    };
     let mut final_width = width;
     let mut final_pad_x = pad_x;
 
@@ -404,7 +487,7 @@ mod tests {
     #[test]
     fn measure_includes_chrome_and_categories() {
         let def = commands();
-        let m = measure(&def, 200, 50, None);
+        let m = measure(&def, 200, 50, None, None);
         // commands has 31 items across 6 categories; rows capped at maxHeight.
         assert_eq!(m.rows, DEFAULT_MAX_HEIGHT);
         assert_eq!(m.width, DEFAULT_WIDTH);
@@ -415,7 +498,7 @@ mod tests {
     #[test]
     fn measure_triggers_mobile_fullscreen() {
         let def = commands();
-        let m = measure(&def, 50, 40, None);
+        let m = measure(&def, 50, 40, None, None);
         assert_eq!(m.width, 50);
         assert_eq!(m.pad_x, 1);
         assert!(m.rows >= 40);
@@ -424,7 +507,7 @@ mod tests {
     #[test]
     fn width_override_beats_the_default() {
         let def = commands();
-        let m = measure(&def, 200, 50, Some(120));
+        let m = measure(&def, 200, 50, Some(120), None);
         assert_eq!(m.width, 120);
     }
 
@@ -433,9 +516,106 @@ mod tests {
         let def = commands();
         // 60% of a 70-col client is 42, but 70 is below the mobile threshold
         // (80), so it goes fullscreen regardless of the override.
-        let m = measure(&def, 70, 40, resolve_dim("60%", 70));
+        let m = measure(&def, 70, 40, resolve_dim("60%", 70), None);
         assert_eq!(m.width, 70);
         assert_eq!(m.pad_x, 1);
+    }
+
+    /// A palette with a preview panel and no items, so sizing tests don't depend
+    /// on the live panes `find_pane` would list.
+    fn previewed() -> PaletteDef {
+        use crate::types::PreviewCtx;
+        PaletteDef {
+            preview: Some(Rc::new(|_: Option<&Item>, _: &PreviewCtx| Vec::new())),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_preview_palette_opens_most_of_the_client() {
+        let m = measure(&previewed(), 200, 50, None, None);
+        assert_eq!(m.width, 200 * PREVIEW_PCT / 100);
+        assert_eq!(m.rows, 50 * PREVIEW_PCT / 100);
+    }
+
+    #[test]
+    fn a_preview_palette_never_opens_smaller_than_a_plain_one() {
+        // 80% of 110x24 is 88x19: under the default width and the row floor.
+        let m = measure(&previewed(), 110, 24, None, None);
+        assert_eq!(m.width, DEFAULT_WIDTH);
+        assert_eq!(m.rows, PREVIEW_MIN_ROWS);
+    }
+
+    #[test]
+    fn a_preview_palette_grows_past_the_default_max_height() {
+        let m = measure(&previewed(), 200, 60, None, None);
+        assert!(m.rows > DEFAULT_MAX_HEIGHT);
+    }
+
+    #[test]
+    fn width_override_beats_a_preview_palette_default() {
+        let m = measure(&previewed(), 200, 50, Some(120), None);
+        assert_eq!(m.width, 120);
+    }
+
+    #[test]
+    fn a_preview_size_pins_both_sides_ahead_of_other_settings() {
+        let m = measure(&previewed(), 200, 50, Some(120), Some((50, 60)));
+        assert_eq!((m.width, m.rows), (100, 30));
+    }
+
+    #[test]
+    fn a_preview_size_leaves_plain_palettes_alone() {
+        let m = measure(&commands(), 200, 50, None, Some((50, 50)));
+        assert_eq!((m.width, m.rows), (DEFAULT_WIDTH, DEFAULT_MAX_HEIGHT));
+    }
+
+    #[test]
+    fn parse_size_pct_reads_one_or_both_sides() {
+        assert_eq!(parse_size_pct("85%"), Some((85, 85)));
+        assert_eq!(parse_size_pct(" 90 "), Some((90, 90)));
+        assert_eq!(parse_size_pct("90%x70%"), Some((90, 70)));
+        assert_eq!(parse_size_pct("90x70"), Some((90, 70)));
+        assert_eq!(parse_size_pct(""), None);
+        assert_eq!(parse_size_pct("big"), None);
+        assert_eq!(parse_size_pct("0%"), None);
+        assert_eq!(parse_size_pct("120%"), None);
+        assert_eq!(parse_size_pct("90%x"), None);
+    }
+
+    #[test]
+    fn format_size_pct_round_trips() {
+        for size in [(85, 85), (90, 70)] {
+            assert_eq!(parse_size_pct(&format_size_pct(size)), Some(size));
+        }
+        assert_eq!(format_size_pct((85, 85)), "85%");
+    }
+
+    #[test]
+    fn step_pct_moves_to_the_next_multiple_of_the_step() {
+        assert_eq!(step_pct(80, 1), 85);
+        assert_eq!(step_pct(80, -1), 75);
+        // 100 of 110 columns (the default's floor) is 91%: grow to 95, shrink to 90.
+        assert_eq!(pct_of(100, 110), 91);
+        assert_eq!(step_pct(91, 1), 95);
+        assert_eq!(step_pct(91, -1), 90);
+    }
+
+    #[test]
+    fn step_pct_stays_within_bounds() {
+        assert_eq!(step_pct(100, 1), 100);
+        assert_eq!(step_pct(MIN_RESIZE_PCT, -1), MIN_RESIZE_PCT);
+    }
+
+    #[test]
+    fn stepping_a_percent_never_stalls_on_rounding() {
+        // 85% of 50 rows is 42 cells, which reads back as 84% — stepping the
+        // stored percent, not the cells, is what keeps every press moving.
+        let mut p = 80;
+        for want in [85, 90, 95, 100] {
+            p = step_pct(p, 1);
+            assert_eq!(p, want);
+        }
     }
 
     #[test]
