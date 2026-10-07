@@ -3,6 +3,7 @@
 //! Rust port of https://github.com/eduwass/tmux-palette (originally TypeScript/Bun).
 //! The crate is split into the same modules as the original so behaviour maps 1:1.
 
+pub mod ansi;
 pub mod cli;
 pub mod dispatch;
 pub mod fuzzy;

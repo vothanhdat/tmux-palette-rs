@@ -8,10 +8,10 @@
 use std::any::Any;
 use std::rc::Rc;
 
+use crate::ansi::{parse_screen, render_row, Cell};
 use crate::fuzzy::multi_fuzzy_score;
 use crate::render::{render_default_item, render_item_styled};
-use crate::text::char_width;
-use crate::tmux::{tmux, tmux_quote};
+use crate::tmux::{tmux, tmux_quote, tmux_raw};
 use crate::types::{Action, Colors, Item, ItemsSource, PaletteDef, PreviewCtx, RenderItemCtx};
 
 const SPINNER: &[char] = &[
@@ -554,27 +554,22 @@ fn render_item_impl(item: &Item, ctx: &RenderItemCtx) -> String {
 /// + command, path, rule.
 const PREVIEW_CHROME: i64 = 3;
 
-/// The pane's visible screen as plain text, one line per pane row.
+/// The pane's visible screen, one line per pane row, with its colors and
+/// attributes as SGR escapes (`-e`). `-N` keeps trailing spaces, which carry a
+/// row's background out to the edge; `parse_screen` trims the plain ones.
 fn capture_pane(target: &str) -> String {
-    tmux(&["capture-pane", "-p", "-t", target])
+    tmux_raw(&["capture-pane", "-p", "-e", "-N", "-t", target])
 }
 
-/// The bottom `height` rows of a captured screen, trailing blank rows dropped.
+/// The bottom `height` rows of a parsed screen, trailing blank rows dropped.
 /// The bottom is where the prompt and the newest output are, which identifies a
 /// pane far better than its top — an idle shell is all blank up there.
-fn screen_tail(capture: &str, height: i64) -> Vec<&str> {
-    let mut lines: Vec<&str> = capture.split('\n').collect();
-    while lines.last().is_some_and(|l| l.trim().is_empty()) {
-        lines.pop();
+fn screen_tail(mut rows: Vec<Vec<Cell>>, height: i64) -> Vec<Vec<Cell>> {
+    while rows.last().is_some_and(|r| r.is_empty()) {
+        rows.pop();
     }
-    let skip = (lines.len() as i64 - height.max(0)).max(0) as usize;
-    lines.split_off(skip)
-}
-
-/// Drop characters that occupy no cell, so the line's width matches what the
-/// renderer measures when it truncates.
-fn sanitize(line: &str) -> String {
-    line.chars().filter(|c| char_width(*c) > 0).collect()
+    let skip = (rows.len() as i64 - height.max(0)).max(0) as usize;
+    rows.split_off(skip)
 }
 
 fn preview_lines(p: &Pane, capture: &str, ctx: &PreviewCtx) -> Vec<String> {
@@ -595,8 +590,15 @@ fn preview_lines(p: &Pane, capture: &str, ctx: &PreviewCtx) -> Vec<String> {
             bg
         ),
     ];
-    for line in screen_tail(capture, ctx.height - PREVIEW_CHROME) {
-        out.push(format!("{}{}{}{}", c.fg, sanitize(line), c.reset, bg));
+    // The screen in its own colors; its default fg/bg draw as the theme's, so
+    // ordinary text sits in the panel like the rest of the popup.
+    for row in screen_tail(parse_screen(capture), ctx.height - PREVIEW_CHROME) {
+        out.push(format!(
+            "{}{}{}",
+            render_row(&row, ctx.width, &c.fg, bg),
+            c.reset,
+            bg
+        ));
     }
     out
 }
@@ -796,26 +798,53 @@ mod tests {
 
     #[test]
     fn screen_tail_drops_trailing_blanks_and_keeps_the_bottom() {
+        let tail = |capture: &str, height: i64| -> Vec<String> {
+            screen_tail(parse_screen(capture), height)
+                .iter()
+                .map(|row| row.iter().map(|(c, _)| c).collect())
+                .collect()
+        };
         // An idle shell: prompt near the top, blank rows below it.
-        assert_eq!(
-            screen_tail("$ ls\nfoo\n$ \n\n\n", 4),
-            vec!["$ ls", "foo", "$ "]
-        );
+        assert_eq!(tail("$ ls\nfoo\n$ \n\n\n", 4), vec!["$ ls", "foo", "$"]);
         // A full screen: the newest output is at the bottom, so that is what shows.
-        assert_eq!(screen_tail("a\nb\nc\nd", 2), vec!["c", "d"]);
+        assert_eq!(tail("a\nb\nc\nd", 2), vec!["c", "d"]);
         // Degenerate heights never panic or over-take.
-        assert_eq!(screen_tail("a\nb", 0), Vec::<&str>::new());
-        assert_eq!(screen_tail("a\nb", -3), Vec::<&str>::new());
-        assert_eq!(screen_tail("\n\n", 5), Vec::<&str>::new());
+        assert!(tail("a\nb", 0).is_empty());
+        assert!(tail("a\nb", -3).is_empty());
+        assert!(tail("\n\n", 5).is_empty());
+        // The spaces `-N` pads every row with are not content.
+        assert_eq!(tail("$ ls      \n          \n", 5), vec!["$ ls"]);
     }
 
     #[test]
-    fn sanitize_keeps_the_cell_count_truthful() {
-        // Control characters occupy no cell; leaving them in would desync the
-        // width the renderer measures from the width the terminal draws.
-        assert_eq!(sanitize("a\x07b\x00c"), "abc");
-        assert_eq!(sanitize("plain text"), "plain text");
-        assert_eq!(sanitize("héllo 😀"), "héllo 😀");
+    fn preview_keeps_the_screen_colors_within_the_column() {
+        let p = parse_pane_line("main\t1\t0\teditor\tvim\tvim\t/tmp\t1\t1", "main:1.0").unwrap();
+        let colors = Colors {
+            fg: "\x1b[38;5;7m".into(),
+            panel: "\x1b[48;5;0m".into(),
+            reset: "\x1b[0m".into(),
+            ..Default::default()
+        };
+        let ctx = PreviewCtx {
+            colors: &colors,
+            width: 8,
+            height: 6,
+        };
+        // A red word, a blue bar running past the column's edge, plain text.
+        let capture = "\x1b[31mred\x1b[39m\n\x1b[44mstatus bar here\x1b[0m\nplain\n";
+        let lines = preview_lines(&p, capture, &ctx);
+        let screen = &lines[PREVIEW_CHROME as usize..];
+        assert_eq!(screen.len(), 3);
+        assert!(screen[0].contains("\x1b[31mred"));
+        assert!(screen[1].contains("\x1b[44mstatus b"));
+        // Default text takes the theme's fg on the panel, like the rest of the popup.
+        assert!(screen[2].contains("\x1b[0m\x1b[38;5;7m\x1b[48;5;0mplain"));
+        // Cut to the column, never past it.
+        let widths: Vec<i64> = screen
+            .iter()
+            .map(|l| crate::text::display_width(l))
+            .collect();
+        assert_eq!(widths, vec![3, 8, 5]);
     }
 
     #[test]
