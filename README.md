@@ -32,8 +32,8 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
   until you type, so the resting palette is unchanged. Search matches the pane
   title, session/window, running command, detected agent, and path.
 - **Pane preview** — *Find Pane* puts the tree on the left and the highlighted
-  pane's live screen on the right, so two `bash` panes are told apart without
-  switching to either. The panel drops away when the popup is too small to hold
+  pane's live screen on the right, in its own colors and attributes, so two
+  `bash` panes are told apart without switching to either. The panel drops away when the popup is too small to hold
   both columns; set `"preview": false` in `sizing.json` to turn it off.
 - **Command prompt** — a drop-in replacement for tmux's `prefix + :`: the
   `command-prompt` palette lets you type any tmux command and run it. Every tmux
