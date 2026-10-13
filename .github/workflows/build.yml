@@ -9,7 +9,8 @@ on:
     branches: [master, dev]
     tags: ["v*"]
     # The publish step commits into dist/; ignore it so that doesn't re-trigger.
-    paths-ignore: ["dist/**"]
+    # The showcase site and its demo recordings don't touch the binary either.
+    paths-ignore: ["dist/**", "docs/**", "demo/**"]
   workflow_dispatch:
 
 permissions:

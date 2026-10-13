@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Stream believable, colored dev-server logs for the demo panes.
+
+    fake-log api   # HTTP request log of a JSON API
+    fake-log web   # a frontend dev server with hot reloads
+    fake-log jobs  # a background worker draining a queue
+
+Seeded, so every recording starts from the same lines; it only exists to give
+the Find Pane preview a live screen to show.
+"""
+
+import random
+import sys
+import time
+
+DIM, RESET, BOLD = "\033[2m", "\033[0m", "\033[1m"
+GREEN, YELLOW, RED, BLUE, MAGENTA, CYAN = (
+    "\033[32m", "\033[33m", "\033[31m", "\033[34m", "\033[35m", "\033[36m",
+)
+
+
+def stamp():
+    return f"{DIM}{time.strftime('%H:%M:%S')}{RESET}"
+
+
+def api(rng):
+    routes = [
+        ("GET", "/v1/users/{id}"), ("GET", "/v1/projects"), ("POST", "/v1/sessions"),
+        ("GET", "/v1/projects/{id}/builds"), ("PATCH", "/v1/users/{id}"),
+        ("DELETE", "/v1/tokens/{id}"), ("GET", "/healthz"),
+    ]
+    method_color = {"GET": BLUE, "POST": GREEN, "PATCH": YELLOW, "DELETE": RED}
+    method, route = rng.choice(routes)
+    path = route.replace("{id}", str(rng.randint(10, 999)))
+    status = rng.choices([200, 201, 204, 304, 404, 500], [60, 10, 8, 10, 8, 2])[0]
+    color = GREEN if status < 300 else (CYAN if status < 400 else (YELLOW if status < 500 else RED))
+    ms = rng.randint(2, 180)
+    return (f"{stamp()} {method_color[method]}{method:<6}{RESET} {path:<28} "
+            f"{color}{status}{RESET} {DIM}{ms:>4}ms{RESET}")
+
+
+def web(rng):
+    files = ["src/App.tsx", "src/routes/index.tsx", "src/components/Palette.tsx",
+             "src/components/PaneTree.tsx", "src/styles/theme.css", "src/lib/fuzzy.ts"]
+    kind = rng.choices(["hmr", "page", "warn"], [6, 3, 1])[0]
+    f = rng.choice(files)
+    if kind == "hmr":
+        return f"{stamp()} {CYAN}{BOLD}[vite]{RESET} {GREEN}hmr update{RESET} {DIM}/{f}{RESET}"
+    if kind == "page":
+        return f"{stamp()} {CYAN}{BOLD}[vite]{RESET} page reload {DIM}{f}{RESET}"
+    return f"{stamp()} {YELLOW}{BOLD}[vite]{RESET} {YELLOW}warning{RESET} unused import in {f}"
+
+
+def jobs(rng):
+    names = ["send-digest", "resize-avatar", "sync-billing", "reindex-search", "prune-sessions"]
+    n = rng.choice(names)
+    jid = rng.randint(1000, 9999)
+    if rng.random() < 0.12:
+        return f"{stamp()} {RED}✗{RESET} {n:<15} {DIM}#{jid}{RESET} {RED}retry in 30s{RESET}"
+    return (f"{stamp()} {GREEN}✓{RESET} {n:<15} {DIM}#{jid}{RESET} "
+            f"done in {MAGENTA}{rng.randint(40, 900)}ms{RESET}")
+
+
+def main():
+    kind = sys.argv[1] if len(sys.argv) > 1 else "api"
+    line = {"api": api, "web": web, "jobs": jobs}[kind]
+    rng = random.Random(kind)
+    banner = {
+        "api": f"{GREEN}{BOLD}➜{RESET} api listening on {CYAN}http://localhost:8080{RESET}",
+        "web": f"{GREEN}{BOLD}  VITE v6.2.0{RESET}  ready in {BOLD}312 ms{RESET}\n\n"
+               f"  {GREEN}➜{RESET}  Local:   {CYAN}http://localhost:5173/{RESET}",
+        "jobs": f"{MAGENTA}{BOLD}worker{RESET} polling queue {BOLD}default{RESET} (concurrency 4)",
+    }[kind]
+    print(banner + "\n", flush=True)
+    for _ in range(14):  # a screenful of history before the live lines
+        print(line(rng), flush=True)
+    try:
+        while True:
+            time.sleep(rng.uniform(0.4, 1.4))
+            print(line(rng), flush=True)
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

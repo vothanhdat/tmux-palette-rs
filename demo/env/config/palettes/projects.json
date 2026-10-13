@@ -1,0 +1,10 @@
+{
+  "title": "Projects",
+  "icon": "\uf07b",
+  "iconColor": "#f9e2af",
+  "command": "ls -1 \"$HOME/code\"",
+  "action": {
+    "shell": "tmux has-session -t '{}' 2>/dev/null || tmux new-session -d -s '{}' -c \"$HOME/code/{}\"; tmux switch-client -t '{}'"
+  },
+  "emptyText": "No projects in ~/code"
+}
