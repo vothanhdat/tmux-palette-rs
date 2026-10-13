@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tmux-palette — a command palette for tmux</title>
+  <meta name="description" content="A fast, Raycast-style command palette for tmux. Jump to any pane, preview it live, run any tmux command, switch themes, and build your own palettes from shell commands. One static Rust binary.">
+  <meta name="theme-color" content="#181825">
+  <meta name="color-scheme" content="dark">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="tmux-palette — a command palette for tmux">
+  <meta property="og:description" content="Jump to any pane, preview it live, run any tmux command, and build your own palettes. One static Rust binary.">
+  <meta property="og:url" content="https://vothanhdat.github.io/tmux-palette-rs/">
+  <meta property="og:image" content="https://vothanhdat.github.io/tmux-palette-rs/media/hero.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://vothanhdat.github.io/tmux-palette-rs/media/hero.png">
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232d2b55'/%3E%3Crect x='7' y='10' width='3' height='12' rx='1' fill='%23fad000'/%3E%3Crect x='13' y='12' width='12' height='2.5' rx='1.2' fill='%23cdd6f4'/%3E%3Crect x='13' y='17.5' width='8' height='2.5' rx='1.2' fill='%23a599e9'/%3E%3C/svg%3E">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      /* Catppuccin Mocha — the same palette the recordings use. */
+      --crust: #11111b;
+      --mantle: #181825;
+      --base: #1e1e2e;
+      --surface0: #313244;
+      --surface1: #45475a;
+      --overlay0: #6c7086;
+      --subtext: #a6adc8;
+      --text: #cdd6f4;
+      --mauve: #cba6f7;
+      --yellow: #f9e2af;
+      --green: #a6e3a1;
+      --blue: #89b4fa;
+      --peach: #fab387;
+      /* tmux-palette's default theme (Shades of Purple). */
+      --sop-panel: #2d2b55;
+      --sop-accent: #fad000;
+      --sop-muted: #a599e9;
+
+      --radius: 14px;
+      --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --max: 1120px;
+      --gutter: 24px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      background: var(--crust);
+      color: var(--text);
+      font: 16px/1.6 var(--sans);
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    img, video { display: block; max-width: 100%; }
+    a { color: var(--mauve); text-decoration: none; }
+    a:hover { text-decoration: underline; text-underline-offset: 3px; }
+    code, kbd, pre { font-family: var(--mono); }
+    :focus-visible { outline: 2px solid var(--sop-accent); outline-offset: 3px; border-radius: 6px; }
+
+    .wrap { max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter); }
+
+    /* ---- nav ---- */
+    .nav {
+      position: sticky; top: 0; z-index: 10;
+      background: color-mix(in srgb, var(--crust) 82%, transparent);
+      backdrop-filter: saturate(140%) blur(12px);
+      -webkit-backdrop-filter: saturate(140%) blur(12px);
+      border-bottom: 1px solid color-mix(in srgb, var(--surface0) 70%, transparent);
+    }
+    .nav .wrap { display: flex; align-items: center; gap: 28px; height: 60px; }
+    .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 700; letter-spacing: -0.01em; }
+    .brand:hover { text-decoration: none; }
+    .logo {
+      width: 26px; height: 26px; border-radius: 7px; background: var(--sop-panel);
+      display: grid; place-items: center; box-shadow: inset 0 0 0 1px #ffffff14;
+    }
+    .logo i { display: block; width: 3px; height: 12px; border-radius: 2px; background: var(--sop-accent); margin-right: 9px; position: relative; }
+    .logo i::after { content: ""; position: absolute; left: 6px; top: 1px; width: 9px; height: 3px; border-radius: 2px; background: var(--text); box-shadow: 0 5px 0 -0.2px var(--sop-muted); }
+    .nav-links { display: flex; gap: 22px; margin-left: auto; font-size: 14.5px; }
+    .nav-links a { color: var(--subtext); }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .gh { display: inline-flex; align-items: center; gap: 7px; }
+    .gh svg { width: 17px; height: 17px; fill: currentColor; }
+    @media (max-width: 720px) { .nav-links .hide-sm { display: none; } }
+
+    /* ---- hero ---- */
+    .hero { position: relative; padding: 76px 0 40px; text-align: center; isolation: isolate; }
+    .hero::before {
+      content: ""; position: absolute; inset: -120px 0 auto; height: 620px; z-index: -1;
+      background:
+        radial-gradient(600px 300px at 50% 30%, color-mix(in srgb, var(--mauve) 22%, transparent), transparent 70%),
+        radial-gradient(500px 260px at 72% 55%, color-mix(in srgb, var(--sop-accent) 9%, transparent), transparent 70%);
+      pointer-events: none;
+    }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font: 500 13px/1 var(--mono); color: var(--subtext);
+      padding: 7px 12px; border: 1px solid var(--surface0); border-radius: 999px; background: var(--mantle);
+    }
+    .eyebrow b { color: var(--green); font-weight: 500; }
+    h1 {
+      margin: 22px auto 16px; max-width: 14ch;
+      font-size: clamp(40px, 7vw, 72px); line-height: 1.02; letter-spacing: -0.035em; font-weight: 800;
+    }
+    h1 em {
+      font-style: normal;
+      background: linear-gradient(100deg, var(--mauve), var(--sop-accent));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .lede { max-width: 640px; margin: 0 auto; font-size: clamp(17px, 2.2vw, 19.5px); color: var(--subtext); }
+    .lede kbd { font-size: 0.85em; }
+
+    .cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin: 30px 0 0; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 9px; height: 46px; padding: 0 20px;
+      border-radius: 10px; font-weight: 600; font-size: 15.5px; border: 1px solid transparent;
+    }
+    .btn:hover { text-decoration: none; }
+    .btn-primary { background: var(--sop-accent); color: #1e1d40; }
+    .btn-primary:hover { background: #ffe04a; }
+    .btn-ghost { background: var(--mantle); color: var(--text); border-color: var(--surface0); }
+    .btn-ghost:hover { border-color: var(--surface1); }
+    .btn svg { width: 18px; height: 18px; fill: currentColor; }
+
+    .oneliner {
+      display: flex; align-items: center; gap: 12px; max-width: 880px; margin: 22px auto 0;
+      padding: 10px 10px 10px 18px; border-radius: 12px; background: var(--mantle); border: 1px solid var(--surface0);
+      text-align: left;
+    }
+    .oneliner code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 13.5px; color: var(--text); scrollbar-width: none; }
+    .oneliner code::-webkit-scrollbar { display: none; }
+    .oneliner .ps { color: var(--green); user-select: none; margin-right: 8px; }
+
+    .copy {
+      flex: none; height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+      font: 500 12.5px/1 var(--sans); color: var(--subtext); background: var(--base); border: 1px solid var(--surface0);
+    }
+    .copy:hover { color: var(--text); border-color: var(--surface1); }
+    .copy.done { color: var(--green); }
+
+    /* ---- terminal frame ---- */
+    .stage { margin: 52px auto 0; max-width: 1040px; }
+    .screen {
+      position: relative; border-radius: var(--radius); overflow: hidden; background: var(--base);
+      box-shadow: 0 0 0 1px #ffffff12, 0 30px 80px -20px #000c, 0 0 120px -40px color-mix(in srgb, var(--mauve) 50%, transparent);
+      aspect-ratio: 1280 / 800;
+    }
+    .screen video, .screen img { width: 100%; height: 100%; object-fit: cover; }
+    .screen video { cursor: zoom-in; }
+    .caption { margin-top: 14px; font-size: 14px; color: var(--overlay0); text-align: center; }
+    .caption kbd { font-size: 12px; }
+
+    kbd {
+      display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 13px; line-height: 1.5;
+      color: var(--text); background: var(--base); border: 1px solid var(--surface1); border-bottom-width: 2px;
+      white-space: nowrap;
+    }
+
+    /* ---- sections ---- */
+    section { padding: 72px 0; }
+    .section-head { max-width: 680px; margin: 0 0 44px; }
+    .section-head.center { margin-left: auto; margin-right: auto; text-align: center; }
+    .kicker { font: 600 12.5px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--sop-accent); }
+    h2 { margin: 12px 0 12px; font-size: clamp(28px, 4vw, 40px); line-height: 1.12; letter-spacing: -0.025em; font-weight: 750; }
+    h3 { margin: 10px 0 10px; font-size: clamp(22px, 2.6vw, 27px); line-height: 1.2; letter-spacing: -0.02em; font-weight: 700; }
+    h3 code { font-size: 0.82em; letter-spacing: -0.04em; color: var(--sop-accent); }
+    .muted { color: var(--subtext); }
+
+    /* feature rows */
+    .feature {
+      display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 48px; align-items: center;
+      padding: 40px 0;
+    }
+    .feature + .feature { border-top: 1px solid var(--surface0); }
+    .feature.flip { grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr); }
+    .feature.flip .media { order: 2; }
+    .feature p { margin: 0 0 14px; color: var(--subtext); }
+    .feature ul { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 9px; }
+    .feature li { position: relative; padding-left: 24px; color: var(--subtext); font-size: 15px; }
+    .feature li::before { content: "›"; position: absolute; left: 4px; top: -1px; color: var(--sop-accent); font-weight: 700; }
+    .feature .screen { border-radius: 12px; }
+    .tag { display: inline-flex; align-items: center; gap: 8px; font: 500 13px/1 var(--mono); color: var(--overlay0); }
+    .tag .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--mauve)); box-shadow: 0 0 12px var(--c, var(--mauve)); }
+    @media (max-width: 880px) {
+      .feature, .feature.flip { grid-template-columns: minmax(0, 1fr); gap: 26px; }
+      .feature.flip .media { order: 0; }
+    }
+
+    /* grid of small things */
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    @media (max-width: 880px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 560px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+    .card {
+      padding: 22px 22px 20px; border-radius: var(--radius); background: var(--mantle); border: 1px solid var(--surface0);
+    }
+    .card h4 { margin: 12px 0 6px; font-size: 16.5px; letter-spacing: -0.01em; }
+    .card p { margin: 0; font-size: 14.5px; color: var(--subtext); }
+    .ico {
+      width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center;
+      background: color-mix(in srgb, var(--c) 14%, var(--base)); color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 28%, transparent);
+    }
+    .ico svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* install */
+    .tabs { display: flex; gap: 6px; padding: 5px; border-radius: 12px; background: var(--mantle); border: 1px solid var(--surface0); width: max-content; max-width: 100%; overflow-x: auto; }
+    .tab {
+      height: 36px; padding: 0 16px; border: 0; border-radius: 8px; cursor: pointer; white-space: nowrap;
+      font: 500 14px/1 var(--sans); color: var(--subtext); background: transparent;
+    }
+    .tab:hover { color: var(--text); }
+    .tab[aria-selected="true"] { background: var(--surface0); color: var(--text); }
+    .panel { margin-top: 18px; }
+    .panel[hidden] { display: none; }
+    .panel > p { color: var(--subtext); margin: 18px 0 10px; }
+    .panel > p:first-child { margin-top: 0; }
+
+    .codeblock { position: relative; }
+    .codeblock .copy {
+      position: absolute; top: 10px; right: 10px; z-index: 1;
+      /* mask code that scrolls under the button */
+      box-shadow: 0 0 0 9px var(--mantle), -18px 0 14px 6px var(--mantle);
+    }
+    pre.code {
+      margin: 0; padding: 18px 84px 18px 20px; border-radius: 12px; overflow-x: auto;
+      background: var(--mantle); border: 1px solid var(--surface0); font-size: 13.5px; line-height: 1.65; color: var(--text);
+    }
+    .c { color: var(--overlay0); }
+    .k { color: var(--mauve); }
+    .s { color: var(--green); }
+    .n { color: var(--peach); }
+    .p { color: var(--blue); }
+    .y { color: var(--yellow); }
+
+    .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; align-items: start; }
+    @media (max-width: 880px) { .two { grid-template-columns: minmax(0, 1fr); gap: 56px; } }
+
+    /* keys table */
+    .keys { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+    .keys td { padding: 10px 0; border-bottom: 1px solid var(--surface0); vertical-align: top; }
+    .keys td:first-child { width: 1%; white-space: nowrap; padding-right: 24px; }
+    .keys tr:last-child td { border-bottom: 0; }
+    .keys td:last-child { color: var(--subtext); }
+
+    .note {
+      margin-top: 18px; padding: 14px 16px; border-radius: 10px; font-size: 14.5px; color: var(--subtext);
+      background: color-mix(in srgb, var(--blue) 7%, var(--mantle)); border: 1px solid color-mix(in srgb, var(--blue) 22%, transparent);
+    }
+
+    /* footer */
+    footer { padding: 48px 0 64px; border-top: 1px solid var(--surface0); color: var(--overlay0); font-size: 14px; }
+    footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; justify-content: space-between; }
+    footer a { color: var(--subtext); }
+
+    @media (max-width: 560px) {
+      :root { --gutter: 16px; }
+      .hero { padding-top: 48px; }
+      section { padding: 56px 0; }
+      .oneliner { padding-left: 14px; }
+      .nav .wrap { gap: 16px; }
+      .nav-links { gap: 16px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+
+<nav class="nav" aria-label="Main">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="tmux-palette home"><span class="logo" aria-hidden="true"><i></i></span>tmux-palette</a>
+    <div class="nav-links">
+      <a class="hide-sm" href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a class="hide-sm" href="#customize">Customize</a>
+      <a class="gh" href="https://github.com/vothanhdat/tmux-palette-rs">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<main id="top">
+  <header class="hero">
+    <div class="wrap">
+      <span class="eyebrow"><b>●</b> one static binary · Rust · MIT</span>
+      <h1>A command palette <em>for tmux</em></h1>
+      <p class="lede">
+        Press <kbd>Ctrl</kbd>&nbsp;<kbd>Space</kbd>, type a few letters, hit enter. Jump to any pane by name,
+        preview it live, run any tmux command, switch themes — or build your own palettes from a shell command.
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary" href="#install">Install</a>
+        <a class="btn btn-ghost" href="https://github.com/vothanhdat/tmux-palette-rs">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .25a.75.75 0 01.673.418l1.882 3.815 4.21.612a.75.75 0 01.416 1.279l-3.046 2.97.719 4.192a.75.75 0 01-1.088.791L8 12.347l-3.766 1.98a.75.75 0 01-1.088-.79l.72-4.194L.818 6.374a.75.75 0 01.416-1.28l4.21-.611L7.327.668A.75.75 0 018 .25z"/></svg>
+          Star on GitHub
+        </a>
+      </div>
+      <div class="oneliner">
+        <code><span class="ps" aria-hidden="true">$</span>curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/master/install.sh | sh</code>
+        <button class="copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/master/install.sh | sh">Copy</button>
+      </div>
+
+      <div class="stage">
+        <div class="screen">
+          <video src="media/hero.mp4" poster="media/hero.png" autoplay muted loop playsinline preload="auto"
+                 aria-label="Demo: opening the palette, jumping to a pane by name, browsing panes with a live preview, and switching themes"></video>
+        </div>
+        <p class="caption">Real recording, no edits: <kbd>Ctrl Space</kbd> → type <code>vite</code> → jump · <em>Find Pane</em> with live previews · <em>Switch Theme</em></p>
+      </div>
+    </div>
+  </header>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Features</span>
+        <h2>Everything in tmux, a few keystrokes away</h2>
+        <p class="muted">Panes, windows, sessions, every tmux command and your own scripts — one fuzzy search box, ranked as you type.</p>
+      </div>
+
+      <article class="feature">
+        <div class="media">
+          <div class="screen">
+            <video data-src="media/find-pane.mp4" poster="media/find-pane.png" muted loop playsinline preload="none"
+                   aria-label="Demo: Find Pane showing a session tree with a live preview of each pane"></video>
+          </div>
+        </div>
+        <div>
+          <span class="tag" style="--c: var(--green)"><span class="dot"></span>Find Pane</span>
+          <h3>See a pane before you switch to it</h3>
+          <p>The session → window → pane tree on the left, the highlighted pane's live screen on the right — in its own colors, updating while you look. Two <code>bash</code> panes are no longer a guessing game.</p>
+          <ul>
+            <li>Filter by title, session, window, running command, path — or the AI agent running in it (<code>claude</code>, <code>codex</code>, <code>aider</code>…)</li>
+            <li>Or skip it entirely: panes surface inline in the main palette as you type</li>
+            <li>Resize with <kbd>Alt</kbd>&nbsp;<kbd>=</kbd> / <kbd>Alt</kbd>&nbsp;<kbd>-</kbd>; the size sticks</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature flip">
+        <div class="media">
+          <div class="screen">
+            <video data-src="media/command-prompt.mp4" poster="media/command-prompt.png" muted loop playsinline preload="none"
+                   aria-label="Demo: the command prompt palette completing split-window and rename-window with argument help"></video>
+          </div>
+        </div>
+        <div>
+          <span class="tag" style="--c: var(--blue)"><span class="dot"></span>Command prompt</span>
+          <h3>A <code>prefix&nbsp;+&nbsp;:</code> that tells you things</h3>
+          <p>A drop-in replacement for tmux's command prompt. Every command from <code>tmux list-commands</code>, searchable by name and alias, grouped by topic and captioned with what it actually does.</p>
+          <ul>
+            <li><kbd>Tab</kbd> completes and cycles through matches, <kbd>Shift</kbd>&nbsp;<kbd>Tab</kbd> goes back</li>
+            <li>Type a full command name and its flags expand below — optional or required, each described</li>
+            <li>Enter runs it, exactly like the built-in prompt</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="media">
+          <div class="screen">
+            <video data-src="media/themes.mp4" poster="media/themes.png" muted loop playsinline preload="none"
+                   aria-label="Demo: browsing bundled themes with a live preview"></video>
+          </div>
+        </div>
+        <div>
+          <span class="tag" style="--c: var(--mauve)"><span class="dot"></span>Themes</span>
+          <h3>13 themes, previewed live</h3>
+          <p>Arrow through the list and the palette repaints as you go. Enter saves, Esc puts it back.</p>
+          <ul>
+            <li>Shades of Purple, Dracula, Tokyo Night, Catppuccin, Gruvbox, Nord, Rosé Pine, Kanagawa, Solarized…</li>
+            <li>A transparent <code>Terminal</code> theme that follows your terminal's own colors</li>
+            <li>Drop a JSON file in <code>themes/</code> and it shows up in the switcher</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature flip">
+        <div class="media">
+          <div class="screen">
+            <video data-src="media/custom-palettes.mp4" poster="media/custom-palettes.png" muted loop playsinline preload="none"
+                   aria-label="Demo: custom palettes listing git branches and projects from shell commands"></video>
+          </div>
+        </div>
+        <div>
+          <span class="tag" style="--c: var(--peach)"><span class="dot"></span>Custom palettes</span>
+          <h3>Turn any command into a palette</h3>
+          <p>One JSON file per palette. Point it at a shell command — each output line becomes an item, <code>{}</code> is the one you picked — and bind a key to its name.</p>
+          <ul>
+            <li>Git branches, GitHub PRs, Docker logs, npm scripts, project switchers — <a href="https://github.com/vothanhdat/tmux-palette-rs/tree/master/examples">examples included</a></li>
+            <li>Or print a JSON array for per-item icons, colors and descriptions</li>
+            <li>Actions run tmux commands, shell commands, popups (<code>lazygit</code>, <code>btop</code>…) or other palettes</li>
+          </ul>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section style="padding-top: 24px">
+    <div class="wrap">
+      <div class="grid">
+        <div class="card">
+          <div class="ico" style="--c: var(--sop-accent)"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div>
+          <h4>One static binary</h4>
+          <p>No runtime, no Bun, no Node. The binary is the launcher <em>and</em> the palette. Opens fast enough to live on a key.</p>
+        </div>
+        <div class="card">
+          <div class="ico" style="--c: var(--mauve)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
+          <h4>Fuzzy, with aliases</h4>
+          <p>Multi-word search, plus initials for free: <code>nw</code> is New Window, <code>sh</code> is Split Horizontal.</p>
+        </div>
+        <div class="card">
+          <div class="ico" style="--c: var(--green)"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H4z"/><path d="M8 20h8M12 16v4"/></svg></div>
+          <h4>Keyboard and mouse</h4>
+          <p><kbd>Ctrl</kbd> <kbd>P</kbd>/<kbd>N</kbd>, arrows, PageUp/Down — or click rows and scroll the wheel.</p>
+        </div>
+        <div class="card">
+          <div class="ico" style="--c: var(--blue)"><svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg></div>
+          <h4>Mobile-aware</h4>
+          <p>Goes fullscreen on narrow terminals, so it works over SSH from Blink or Moshi on a phone.</p>
+        </div>
+        <div class="card">
+          <div class="ico" style="--c: var(--peach)"><svg viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg></div>
+          <h4>Config that survives updates</h4>
+          <p>Everything lives in <code>~/.config/tmux-palette/*.json</code>. Add commands, hide built-ins, resize — no fork.</p>
+        </div>
+        <div class="card">
+          <div class="ico" style="--c: var(--yellow)"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></svg></div>
+          <h4>Interactive commands work</h4>
+          <p>Actions run <em>after</em> the popup closes, so <code>confirm-before</code> and <code>command-prompt</code> get your keyboard.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Install</span>
+        <h2>Up and running in a minute</h2>
+        <p class="muted">Prebuilt for Linux x86_64, Linux arm64 and macOS on Apple Silicon (Linux builds are static musl). Other platforms build from source. tmux 3.4+ recommended.</p>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="Install method">
+        <button class="tab" role="tab" id="tab-curl" aria-selected="true" aria-controls="panel-curl">One-line install</button>
+        <button class="tab" role="tab" id="tab-tpm" aria-selected="false" aria-controls="panel-tpm" tabindex="-1">TPM</button>
+        <button class="tab" role="tab" id="tab-src" aria-selected="false" aria-controls="panel-src" tabindex="-1">From source</button>
+      </div>
+
+      <div class="panel" role="tabpanel" id="panel-curl" aria-labelledby="tab-curl">
+        <p>Downloads the right prebuilt to <code>~/.local/bin/tmux-palette</code> — no toolchain needed.</p>
+        <div class="codeblock"><button class="copy" type="button">Copy</button><pre class="code">curl -fsSL https://raw.githubusercontent.com/vothanhdat/tmux-palette-rs/master/install.sh | sh</pre></div>
+        <p>Bind it in <code>~/.tmux.conf</code> (the installer prints this line for you), then <code>tmux source-file ~/.tmux.conf</code>:</p>
+        <div class="codeblock"><button class="copy" type="button">Copy</button><pre class="code"><span class="k">bind</span> -n C-Space run-shell <span class="s">"~/.local/bin/tmux-palette"</span></pre></div>
+      </div>
+
+      <div class="panel" role="tabpanel" id="panel-tpm" aria-labelledby="tab-tpm" hidden>
+        <p>Add to <code>~/.tmux.conf</code>, then press <kbd>prefix</kbd> <kbd>I</kbd>. The default branch ships prebuilts, so nothing compiles.</p>
+        <div class="codeblock"><button class="copy" type="button">Copy</button><pre class="code"><span class="k">set</span> -g @plugin <span class="s">'vothanhdat/tmux-palette-rs'</span>
+<span class="c"># all optional:</span>
+<span class="k">set</span> -g @palette-key <span class="s">'C-Space'</span>              <span class="c"># main palette, no prefix needed</span>
+<span class="k">set</span> -g @palette-find-pane-key <span class="s">'M-f'</span>        <span class="c"># straight to Find Pane</span>
+<span class="k">set</span> -g @palette-command-prompt-key <span class="s">':'</span>     <span class="c"># replace prefix + :</span>
+<span class="k">set</span> -g @palette-width <span class="s">'60%'</span>                <span class="c"># percent of the client, or columns</span></pre></div>
+      </div>
+
+      <div class="panel" role="tabpanel" id="panel-src" aria-labelledby="tab-src" hidden>
+        <p>Needs a stable Rust toolchain (<a href="https://rustup.rs">rustup.rs</a>).</p>
+        <div class="codeblock"><button class="copy" type="button">Copy</button><pre class="code">git clone https://github.com/vothanhdat/tmux-palette-rs ~/Sites/tmux-palette
+cd ~/Sites/tmux-palette
+cargo build --release</pre></div>
+        <p>Then bind the binary:</p>
+        <div class="codeblock"><button class="copy" type="button">Copy</button><pre class="code"><span class="k">bind</span> -n C-Space run-shell <span class="s">"~/Sites/tmux-palette/target/release/tmux-palette"</span></pre></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="customize">
+    <div class="wrap two">
+      <div>
+        <span class="kicker">Customize</span>
+        <h2>A palette is a JSON file</h2>
+        <p class="muted">Save this as <code>~/.config/tmux-palette/palettes/git-branches.json</code> and bind a key to its name. That's the whole plugin.</p>
+        <div class="codeblock"><button class="copy" type="button">Copy</button><pre class="code">{
+  <span class="p">"title"</span>: <span class="s">"Git Branches"</span>,
+  <span class="p">"command"</span>: <span class="s">"git branch --format='%(refname:short)'"</span>,
+  <span class="p">"action"</span>: {
+    <span class="p">"tmux"</span>: <span class="s">"send-keys 'git checkout {}' Enter"</span>
+  }
+}</pre></div>
+        <div class="codeblock" style="margin-top: 12px"><button class="copy" type="button">Copy</button><pre class="code"><span class="k">bind</span> -n M-b run-shell <span class="s">"~/.local/bin/tmux-palette git-branches"</span></pre></div>
+        <p class="note">Also in <code>~/.config/tmux-palette/</code>: <code>commands.json</code> to add items, <code>hidden.json</code> to hide built-ins, <code>theme.json</code>, <code>sizing.json</code>, <code>aliases.json</code>. See the <a href="https://github.com/vothanhdat/tmux-palette-rs#customize">README</a>.</p>
+      </div>
+      <div>
+        <span class="kicker">Keys</span>
+        <h2>Muscle memory</h2>
+        <table class="keys">
+          <tbody>
+            <tr><td><kbd>Ctrl</kbd> <kbd>Space</kbd></td><td>Open the palette</td></tr>
+            <tr><td>type…</td><td>Filter commands, and panes across every session</td></tr>
+            <tr><td><kbd>↑</kbd> <kbd>↓</kbd> · <kbd>Ctrl</kbd> <kbd>P</kbd>/<kbd>N</kbd></td><td>Move the selection</td></tr>
+            <tr><td><kbd>PgUp</kbd> <kbd>PgDn</kbd></td><td>Jump 10 rows</td></tr>
+            <tr><td><kbd>Enter</kbd></td><td>Run it</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Close, or back out of a nested palette</td></tr>
+            <tr><td><kbd>Tab</kbd> · <kbd>Shift</kbd> <kbd>Tab</kbd></td><td>Complete and cycle (command prompt)</td></tr>
+            <tr><td><kbd>Alt</kbd> <kbd>=</kbd> · <kbd>Alt</kbd> <kbd>-</kbd></td><td>Grow / shrink Find Pane</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>MIT licensed. A Rust port of <a href="https://github.com/eduwass/tmux-palette">eduwass/tmux-palette</a>.</span>
+    <span><a href="https://github.com/vothanhdat/tmux-palette-rs">Source</a> · <a href="https://github.com/vothanhdat/tmux-palette-rs/issues">Issues</a> · <a href="https://github.com/vothanhdat/tmux-palette-rs/tree/master/demo">How these demos are recorded</a></span>
+  </div>
+</footer>
+
+<script>
+  // Copy buttons: data-copy, or the text of the code block they sit on.
+  document.querySelectorAll(".copy").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const text = btn.dataset.copy || btn.parentElement.querySelector("pre").textContent.trim();
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = "Copied";
+        btn.classList.add("done");
+      } catch {
+        btn.textContent = "Press ⌘C";
+      }
+      setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1600);
+    });
+  });
+
+  // Install tabs (arrow keys move between them, per the ARIA tabs pattern).
+  const tabs = [...document.querySelectorAll(".tab")];
+  const select = (tab) => {
+    tabs.forEach((t) => {
+      const on = t === tab;
+      t.setAttribute("aria-selected", on);
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
+    });
+  };
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => select(tab));
+    tab.addEventListener("keydown", (e) => {
+      const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (!d) return;
+      const next = tabs[(i + d + tabs.length) % tabs.length];
+      select(next);
+      next.focus();
+    });
+  });
+
+  // Feature clips load and play only while on screen; reduced motion gets
+  // posters plus controls instead of autoplay.
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const videos = document.querySelectorAll("video");
+  if (reduce) {
+    videos.forEach((v) => {
+      v.removeAttribute("autoplay");
+      v.pause();
+      if (v.dataset.src) v.src = v.dataset.src;
+      v.controls = true;
+    });
+  } else if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(({ target: v, isIntersecting }) => {
+        if (isIntersecting) {
+          if (v.dataset.src && !v.src) v.src = v.dataset.src;
+          v.play().catch(() => {});
+        } else {
+          v.pause();
+        }
+      });
+    }, { threshold: 0.35 });
+    videos.forEach((v) => io.observe(v));
+  } else {
+    videos.forEach((v) => { if (v.dataset.src) v.src = v.dataset.src; v.autoplay = true; });
+  }
+
+  // Click or tap a clip to watch it full screen — they're small on phones.
+  videos.forEach((v) => {
+    v.title = "View full screen";
+    v.addEventListener("click", () => {
+      if (v.dataset.src && !v.src) v.src = v.dataset.src;
+      if (v.requestFullscreen) v.requestFullscreen().then(() => v.play()).catch(() => {});
+      else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen(); // iPhone Safari
+    });
+  });
+</script>
+</body>
+</html>

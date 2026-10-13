@@ -9,8 +9,17 @@ Type a few letters, pick a command, hit enter: split a pane, jump to a window,
 detach a session, open a popup tool, or switch to a custom palette. User config
 lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
 
-**Commands** — main palette for panes, windows, sessions, and built-in tmux actions.
-**Themes + plugins** — theme picker with live preview, plus custom palettes powered by shell commands.
+<p align="center">
+  <img src="docs/media/hero.gif" width="100%"
+       alt="Pressing Ctrl+Space opens the palette; typing 'vite' jumps to that pane, Find Pane browses every pane with a live preview, and Switch Theme previews themes as you move">
+</p>
+
+<p align="center">
+  <a href="https://vothanhdat.github.io/tmux-palette-rs/"><b>Website</b></a> ·
+  <a href="#demos">More demos</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#customize">Customize</a>
+</p>
 
 ## Why a Rust port?
 
@@ -61,6 +70,40 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
 - **Scriptable sources** — point a palette at a shell command that prints JSON or
   one item per line. Examples live in [`examples/`](examples)
 - **No fork required** — every customization lives in `~/.config/tmux-palette/*.json`
+
+## Demos
+
+Real recordings of the binary in this repo, scripted with
+[VHS](https://github.com/charmbracelet/vhs) — [`demo/`](demo) re-records them.
+The [website](https://vothanhdat.github.io/tmux-palette-rs/) plays them as video.
+
+<details>
+<summary><b>Find Pane</b> — the pane tree with a live preview; filter, jump, resize</summary>
+<br>
+<img src="docs/media/find-pane.gif" width="100%"
+     alt="Alt+f opens Find Pane: moving through the tree previews each pane's live screen, typing 'work' filters to the worker pane, Enter jumps there, and Alt+= / Alt+- resize the popup">
+</details>
+
+<details>
+<summary><b>Command prompt</b> — <code>prefix + :</code> with every tmux command, described, with argument help</summary>
+<br>
+<img src="docs/media/command-prompt.gif" width="100%"
+     alt="prefix + : opens Run Command: commands are grouped and described, typing 'split-window ' expands its flags, Enter splits the pane, and Tab completes rename-window">
+</details>
+
+<details>
+<summary><b>Themes</b> — every bundled theme, previewed live</summary>
+<br>
+<img src="docs/media/themes.gif" width="100%"
+     alt="Switch Theme: arrowing through the theme list repaints the palette in each theme; Enter saves one">
+</details>
+
+<details>
+<summary><b>Custom palettes</b> — a JSON file plus any shell command</summary>
+<br>
+<img src="docs/media/custom-palettes.gif" width="100%"
+     alt="A git-branches palette lists branches from git branch and checks one out; a projects palette lists ~/code and switches to that project's session">
+</details>
 
 ## Requirements
 
@@ -356,6 +399,8 @@ src/
   user_config.rs     ~/.config/tmux-palette/*.json loaders
   raw.rs             termios raw mode, terminal size, signal handling
   palettes/          commands, command-prompt, find-pane, move-pane, themes
+docs/                the website (GitHub Pages) and the demo GIFs/videos
+demo/                VHS tapes + a throwaway tmux workspace that record them
 ```
 
 Run the tests with `cargo test`.
