@@ -352,7 +352,7 @@
         <div class="media">
           <div class="screen">
             <video data-src="media/command-prompt.mp4" poster="media/command-prompt.png" muted loop playsinline preload="none"
-                   aria-label="Demo: the command prompt palette completing split-window and rename-window with argument help"></video>
+                   aria-label="Demo: the command prompt explaining each command, completing split-window into a pill with its flags described and ticked off, and taking back a wrong pick with Backspace"></video>
           </div>
         </div>
         <div>
@@ -360,8 +360,10 @@
           <h3>A <code>prefix&nbsp;+&nbsp;:</code> that tells you things</h3>
           <p>A drop-in replacement for tmux's command prompt. Every command from <code>tmux list-commands</code>, searchable by name and alias, grouped by topic and captioned with what it actually does.</p>
           <ul>
-            <li><kbd>Tab</kbd> completes and cycles through matches, <kbd>Shift</kbd>&nbsp;<kbd>Tab</kbd> goes back</li>
-            <li>Type a full command name and its flags expand below — optional or required, each described</li>
+            <li><kbd>Tab</kbd> completes the highlighted match and cycles on, <kbd>Shift</kbd>&nbsp;<kbd>Tab</kbd> goes back</li>
+            <li>A completed command is a pill: <kbd>Backspace</kbd> removes it whole and puts back what you typed</li>
+            <li>Commit to a command and its flags expand below, each described for that command, ticked off as you type them</li>
+            <li>A strip explains the highlighted command, with an example and the keys you've bound to it</li>
             <li>Enter runs it, exactly like the built-in prompt</li>
           </ul>
         </div>

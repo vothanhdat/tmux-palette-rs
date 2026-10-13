@@ -53,12 +53,17 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
   alias, grouped by topic (sessions, windows, panes, …), icon-tagged by verb
   (new, kill, rename, …), and captioned with what it actually does — so
   `break-pane`, `join-pane` and `move-pane` are told apart at a glance. **Tab**
-  completes a command into the prompt and cycles through the matches
-  (**Shift-Tab** goes back); Enter runs a no-arg command immediately or completes
-  one that takes arguments. Once you've typed a complete command name, its
-  arguments expand below it — each flag/param on its own line, tagged
-  optional/required, with a short description — and stay there while you fill
-  them in
+  completes the highlighted command into the prompt, and pressing it again
+  cycles through the matches (**Shift-Tab** goes back); Enter runs a no-arg
+  command immediately or completes one that takes arguments. A completed command
+  sits in the prompt as a pill: **Backspace** removes it whole and puts back what
+  you had typed, so a wrong pick is one key to undo. Once the command is
+  committed (completed, or typed and followed by a space), its arguments expand
+  below it — every flag on its own line, tagged optional/required and described
+  for *that* command (`split-window -h` reads "side by side (left | right)") —
+  and stay there while you fill them in, ticking off the flags you've typed. A
+  strip at the bottom explains the highlighted command in a sentence or two,
+  gives an example, and shows the keys you have bound to it
 - **Custom palettes** — define your own with a single JSON file, bind to any key
 - **Hide built-ins** — declutter the default palette via `hidden.json`
 - **Mobile-aware** — auto-fullscreens on narrow terminals (Moshi / Blink on iOS)
@@ -85,10 +90,10 @@ The [website](https://vothanhdat.github.io/tmux-palette-rs/) plays them as video
 </details>
 
 <details>
-<summary><b>Command prompt</b> — <code>prefix + :</code> with every tmux command, described, with argument help</summary>
+<summary><b>Command prompt</b> — <code>prefix + :</code> with every tmux command explained, every flag described</summary>
 <br>
 <img src="docs/media/command-prompt.gif" width="100%"
-     alt="prefix + : opens Run Command: commands are grouped and described, typing 'split-window ' expands its flags, Enter splits the pane, and Tab completes rename-window">
+     alt="prefix + : opens Run Command: a strip under the grouped list explains each highlighted command; Tab turns 'spl' into a split-window pill whose flags expand, described and ticked off as -h -l 35% is typed; Enter splits the pane; Backspace takes back a rename-session pick so Tab can complete rename-window instead">
 </details>
 
 <details>
@@ -268,8 +273,9 @@ cargo install --path .
 - **Up/Down arrows** or **Ctrl+P / Ctrl+N** to move selection.
 - **PageUp / PageDown** jump 10 rows.
 - **Enter** to run the selected command.
-- **Tab / Shift-Tab** (in the `command-prompt` palette) complete a command into
-  the prompt and cycle forward/backward through the matches.
+- **Tab / Shift-Tab** (in the `command-prompt` palette) complete the highlighted
+  command into the prompt, then cycle forward/backward through the matches.
+  **Backspace** right after a completed command removes it whole.
 - **Alt+= / Alt+-** (or **Alt+Up / Alt+Down**) in *Find Pane* grow/shrink the
   popup — see [Popup width](#via-tpm-tmux-plugin-manager) above.
 - **Esc** to cancel (or pop back one level in a nested palette).
@@ -365,11 +371,15 @@ terminal's own colorscheme. See the bundled `terminal` theme.
 - A new `command-prompt` palette replaces tmux's `prefix + :` prompt: type any
   tmux command to run it, with every command from `tmux list-commands` searchable
   as a suggestion, grouped by topic and icon-tagged by verb for browsing.
-  Selecting one runs it or completes it into the prompt; Tab cycles through
-  matches; and once you've typed a full command name its arguments expand
+  Selecting one runs it or completes it into the prompt; Tab completes the
+  highlighted match and cycles on from there; a completed command is a pill that
+  Backspace removes whole; and once a command is committed its arguments expand
   (optional/required, with descriptions) and stay expanded while you type them —
   none of which the original had.
-- Each command in that palette carries a one-line description of what it does.
+- Each command in that palette carries a one-line description of what it does,
+  and a details strip with a longer explanation, an example and your key
+  bindings for it. Every flag of every command (tmux 3.4 through the current
+  development version) has its own description, written from the man page.
   tmux publishes no such text — `list-commands` gives only `name (alias) usage` —
   so the palette bundles one per command. The usage string it *does* give is no
   substitute: `new-pane`'s runs to 269 characters, and 26 of the 91 commands have

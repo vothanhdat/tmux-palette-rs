@@ -276,6 +276,18 @@ pub fn compose_header(
     }
 }
 
+/// How one char of the search input is drawn.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InputStyle {
+    Plain,
+    Pill,
+    Selected,
+}
+
+/// The search line: `▌ <input>`, with any selected range highlighted and the
+/// first `chip` chars drawn as a pill. The pill's padding is the space before
+/// the input and the one that commits the token, so no char moves and the
+/// cursor stays at column `pad_x + 3 + cursor`.
 pub fn compose_search(
     filter: &str,
     pad_x: i64,
@@ -283,6 +295,7 @@ pub fn compose_search(
     colors: &Colors,
     sel_start: Option<usize>,
     sel_end: Option<usize>,
+    chip: usize,
 ) -> String {
     let pad = spaces(pad_x);
     if filter.is_empty() {
@@ -298,36 +311,45 @@ pub fn compose_search(
             colors.reset
         );
     }
-    let text = truncate(filter, body_width - 2);
-    let has_selection = matches!((sel_start, sel_end), (Some(a), Some(b)) if a < b);
-    if !has_selection {
-        return format!(
-            "{}{}{}▌{} {}{}{}{}",
-            colors.panel, pad, colors.accent, colors.fg, text, colors.panel, pad, colors.reset
-        );
+    let chars: Vec<char> = truncate(filter, body_width - 2).chars().collect();
+    let selection = match (sel_start, sel_end) {
+        (Some(a), Some(b)) if a < b => Some((a, b)),
+        _ => None,
+    };
+    let style_at = |i: usize| match selection {
+        Some((a, b)) if (a..b).contains(&i) => InputStyle::Selected,
+        _ if chip > 0 && i <= chip => InputStyle::Pill,
+        _ => InputStyle::Plain,
+    };
+    let escape = |style: InputStyle| match style {
+        InputStyle::Plain => format!("{}{}{}", colors.reset, colors.panel, colors.fg),
+        InputStyle::Pill => format!(
+            "{}{}{}{}",
+            colors.reset, colors.bg, colors.accent, colors.bold
+        ),
+        InputStyle::Selected => format!("{}{}", colors.reset, colors.selected),
+    };
+
+    let lead = if chip > 0 {
+        InputStyle::Pill
+    } else {
+        InputStyle::Plain
+    };
+    let mut out = format!("{}{}{}▌{} ", colors.panel, pad, colors.accent, escape(lead));
+    let mut current = lead;
+    for (i, c) in chars.iter().enumerate() {
+        let style = style_at(i);
+        if style != current {
+            out.push_str(&escape(style));
+            current = style;
+        }
+        out.push(*c);
     }
-    let chars: Vec<char> = text.chars().collect();
-    let total = chars.len();
-    let a = sel_start.unwrap().min(total);
-    let b = sel_end.unwrap().clamp(a, total);
-    let before: String = chars[..a].iter().collect();
-    let inside: String = chars[a..b].iter().collect();
-    let after: String = chars[b..].iter().collect();
-    format!(
-        "{}{}{}▌{} {}{}{}{}{}{}{}{}",
-        colors.panel,
-        pad,
-        colors.accent,
-        colors.fg,
-        before,
-        colors.selected,
-        inside,
-        colors.panel,
-        colors.fg,
-        after,
-        pad,
-        colors.reset
-    )
+    out.push_str(&format!(
+        "{}{}{}{}",
+        colors.reset, colors.panel, pad, colors.reset
+    ));
+    out
 }
 
 /// Cells the gutter between the list and the preview occupies: space, rule, space.
@@ -458,6 +480,23 @@ pub fn compose_list_body<F: Fn(&Row, bool) -> String>(
         ));
     }
     ListBody { lines, row_actions }
+}
+
+/// The details strip under the list: `rows` lines of the palette's content on
+/// the panel background, cut to the body width and padded out with blanks.
+pub fn compose_details(
+    lines: &[String],
+    rows: usize,
+    body_width: i64,
+    pad_x: i64,
+    colors: &Colors,
+) -> Vec<String> {
+    (0..rows)
+        .map(|i| {
+            let content = lines.get(i).map_or("", |s| s.as_str());
+            body_line(content, false, body_width, pad_x, colors, None)
+        })
+        .collect()
 }
 
 pub fn compose_footer(footer_text: &str, pad_x: i64, body_width: i64, colors: &Colors) -> String {
