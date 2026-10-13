@@ -4,14 +4,20 @@
 //! The command list is pulled live from `tmux list-commands`, so *every* tmux
 //! command is searchable by name and alias. Selecting a command runs it
 //! immediately when it needs no arguments, or completes `<name> ` into the input
-//! when it takes arguments. Tab cycles through the matches (see the palette
-//! loop), and a synthetic "Run: <what you typed>" row always dispatches the
-//! typed line via the after-popup trick that keeps interactive prompts fed.
+//! when it takes arguments. Tab completes the highlighted match and cycles on
+//! from there (see the palette loop), and a synthetic "Run: <what you typed>"
+//! row always dispatches the typed line via the after-popup trick that keeps
+//! interactive prompts fed.
+//!
+//! The space after a command name commits to it: the name becomes a pill in
+//! the input that Backspace deletes whole, and the list gives way to that
+//! command. Until then an exact name or alias only narrows the list — `rename`
+//! is `rename-session`'s alias, but you may be typing `rename-window`.
 //!
 //! Each row says what its command *does*, from the bundled `CMD_DESCS` table —
 //! tmux itself offers no such text, and the usage string it does offer is no
 //! substitute (`new-pane`'s runs to 269 characters). The usage rides along in
-//! `Item.data` instead, and comes into its own once the first word is a complete
+//! `Item.data` instead, and comes into its own once the input commits to a
 //! command name (or alias): that command's arguments are then expanded below it,
 //! one per line, tagged optional/required with a short description drawn from a
 //! bundled glossary of tmux's (very consistent) placeholder names and common
@@ -635,25 +641,49 @@ fn command_named(item: &Item, head: &str) -> bool {
             .is_some_and(|a| a.iter().any(|x| x == head))
 }
 
-/// Filter: always offer a "Run: <query>" row on top. Once the first word is a
-/// complete command name (you've typed `<command>` and are onto its
-/// parameters), show that command — description and all — and expand its
-/// arguments as help rows, which stay put while you type the params. Otherwise
-/// fuzzy-rank the command list by name so a partial word just narrows the
-/// choices without prematurely committing to one.
+/// The command the input has committed to: its first word names a command (or
+/// alias) and a space follows it. Until that space the word may still be the
+/// start of a longer name — `rename` is `rename-session`'s alias, but you may
+/// be on your way to `rename-window` — so it only narrows the list.
+fn committed_command<'a>(items: &'a [Item], input: &str) -> Option<(&'a Item, usize)> {
+    let end = input.find(char::is_whitespace)?;
+    let head = &input[..end];
+    items
+        .iter()
+        .find(|it| command_named(it, head))
+        .map(|cmd| (cmd, head.chars().count()))
+}
+
+/// The committed command name, drawn as a pill and deleted as one unit.
+fn command_chip(items: &[Item], input: &str) -> Option<usize> {
+    committed_command(items, input).map(|(_, len)| len)
+}
+
+/// Filter: always offer a "Run: <query>" row on top. Once the input commits to
+/// a command (see `committed_command`), show that command — description and
+/// all — and expand its arguments as help rows, which stay put while you type
+/// them. Otherwise fuzzy-rank the command list by name, so a partial word just
+/// narrows the choices without prematurely committing to one.
+///
+/// `query` arrives with its trailing whitespace, which is what commits.
 fn filter_commands(items: &[Item], query: &str) -> Vec<Item> {
     let mut out = Vec::new();
-    out.push(run_typed_item(query));
+    out.push(run_typed_item(query.trim()));
 
-    let head = query.split_whitespace().next().unwrap_or("");
-    if let Some(cmd) = items.iter().find(|it| command_named(it, head)) {
+    if let Some((cmd, _)) = committed_command(items, query) {
         let params = parse_usage(usage_of(cmd));
-        out.push(cmd.clone());
+        // A heading now, not a choice: Enter belongs to the Run row, and Tab
+        // must not swap the arguments you've typed for the bare name.
+        out.push(Item {
+            selectable: Some(false),
+            complete: None,
+            ..cmd.clone()
+        });
         out.extend(params.iter().map(help_item));
         return out;
     }
 
-    out.extend(match_commands(items, query));
+    out.extend(match_commands(items, query.trim()));
     out
 }
 
@@ -705,6 +735,7 @@ pub fn command_prompt() -> PaletteDef {
         items: ItemsSource::Dynamic(Rc::new(build_items)),
         filter: Some(Rc::new(filter_commands)),
         render_item: Some(Rc::new(render_item)),
+        chip: Some(Rc::new(command_chip)),
         ..Default::default()
     }
 }
@@ -782,15 +813,19 @@ mod tests {
     }
 
     #[test]
-    fn exact_command_expands_help_rows() {
+    fn committed_command_expands_help_rows() {
         let items = vec![parse_command_line("rename-window [-t target-window] new-name").unwrap()];
-        let vis = filter_commands(&items, "rename-window");
+        let vis = filter_commands(&items, "rename-window ");
         assert_eq!(vis[0].title, "Run: rename-window");
         assert_eq!(vis[1].title, "rename-window");
         // The command keeps its description while you type parameters; the usage
         // it was parsed from rides in `data`, not on the row.
         assert_eq!(vis[1].description.as_deref(), Some("rename a window"));
         assert_eq!(usage_of(&vis[1]), "[-t target-window] new-name");
+        // It is a heading now: Enter runs the Run row, and Tab has nothing to
+        // swap the typed arguments for.
+        assert_eq!(vis[1].selectable, Some(false));
+        assert_eq!(vis[1].complete, None);
         // Help rows follow, non-selectable, carrying HelpParam data.
         assert!(vis.len() >= 4);
         assert_eq!(vis[2].selectable, Some(false));
@@ -810,20 +845,57 @@ mod tests {
     }
 
     #[test]
-    fn partial_name_stays_a_list_but_exact_name_plus_params_expands() {
+    fn a_name_commits_once_a_space_follows_it() {
         let items = vec![
             parse_command_line("rename-window (renamew) [-t target-window] new-name").unwrap(),
         ];
         // Partial name: no help rows, just the ranked command under the Run row.
         assert!(!has_help_rows(&filter_commands(&items, "rename-w")));
-        // Exact name alone: help expands (you've committed to the command).
-        assert!(has_help_rows(&filter_commands(&items, "rename-window")));
+        // The full name, still being typed: a list, not yet a commitment.
+        assert!(!has_help_rows(&filter_commands(&items, "rename-window")));
+        // A space commits: help expands.
+        assert!(has_help_rows(&filter_commands(&items, "rename-window ")));
         // Exact name plus a typed parameter: help stays put.
         let typing = filter_commands(&items, "rename-window my-name");
         assert_eq!(typing[0].title, "Run: rename-window my-name");
         assert!(has_help_rows(&typing));
         // The alias triggers it the same way.
         assert!(has_help_rows(&filter_commands(&items, "renamew foo")));
+    }
+
+    /// `rename` is `rename-session`'s alias, and `new` is `new-session`'s — but
+    /// typing either must not hide the `-window` command you may be heading for.
+    #[test]
+    fn an_alias_does_not_hide_its_siblings_until_committed() {
+        let items = vec![
+            parse_command_line("rename-session (rename) [-t target-session] new-name").unwrap(),
+            parse_command_line("rename-window (renamew) [-t target-window] new-name").unwrap(),
+        ];
+        let titles = |q: &str| -> Vec<String> {
+            filter_commands(&items, q)
+                .into_iter()
+                .map(|i| i.title)
+                .collect()
+        };
+        assert_eq!(
+            titles("rename"),
+            vec!["Run: rename", "rename-session", "rename-window"]
+        );
+        // Once a space commits to the alias, it means rename-session.
+        let committed = titles("rename ");
+        assert_eq!(committed[1], "rename-session");
+        assert!(!committed.contains(&"rename-window".to_string()));
+    }
+
+    #[test]
+    fn the_pill_is_the_committed_command_name() {
+        let items = vec![parse_command_line("split-window (splitw) [-bdfhIvPZ]").unwrap()];
+        assert_eq!(command_chip(&items, "split-window -h"), Some(12));
+        assert_eq!(command_chip(&items, "splitw "), Some(6));
+        // Not yet committed, not a command, or not at the start: no pill.
+        assert_eq!(command_chip(&items, "split-window"), None);
+        assert_eq!(command_chip(&items, "split-pane "), None);
+        assert_eq!(command_chip(&items, " split-window "), None);
     }
 
     #[test]
@@ -925,8 +997,8 @@ mod tests {
         let hits = match_commands(&items, "rename-window");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].title, "rename-window");
-        // ...and the single match expands into help rows.
-        let vis = filter_commands(&items, "rename-window");
+        // ...and, once committed, expands into help rows.
+        let vis = filter_commands(&items, "rename-window ");
         assert!(vis.iter().any(|i| i
             .data
             .as_ref()

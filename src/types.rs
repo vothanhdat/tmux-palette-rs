@@ -179,6 +179,9 @@ pub type RenderItemFn = Rc<dyn Fn(&Item, &RenderItemCtx) -> String>;
 pub type FilterFn = Rc<dyn Fn(&[Item], &str) -> Vec<Item>>;
 pub type OnSelectFn = Rc<dyn Fn(Option<&Item>) -> Option<Theme>>;
 pub type InitialSelectedFn = Rc<dyn Fn(&[Item]) -> i64>;
+/// Chars at the start of the search input that form a committed token, or
+/// `None` — see `PaletteDef.chip`.
+pub type ChipFn = Rc<dyn Fn(&[Item], &str) -> Option<usize>>;
 
 /// Builds the right-hand panel for the highlighted item, top line first, at
 /// most `height` lines. Every line must end by restoring `colors.panel`, the
@@ -204,6 +207,10 @@ pub struct PaletteDef {
     /// Right-hand panel describing the highlighted item (Find Pane shows the
     /// pane's live screen). `None` gives the list the full body width.
     pub preview: Option<PreviewFn>,
+    /// A leading token of the search input that is drawn as a pill and edited
+    /// as one unit: arrows step over it and Backspace removes it whole. The
+    /// command prompt's is the command name, once a space commits to it.
+    pub chip: Option<ChipFn>,
 }
 
 impl Default for PaletteDef {
@@ -219,6 +226,7 @@ impl Default for PaletteDef {
             on_select: None,
             initial_selected: None,
             preview: None,
+            chip: None,
         }
     }
 }

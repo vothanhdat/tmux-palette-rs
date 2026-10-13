@@ -53,12 +53,14 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
   alias, grouped by topic (sessions, windows, panes, …), icon-tagged by verb
   (new, kill, rename, …), and captioned with what it actually does — so
   `break-pane`, `join-pane` and `move-pane` are told apart at a glance. **Tab**
-  completes a command into the prompt and cycles through the matches
-  (**Shift-Tab** goes back); Enter runs a no-arg command immediately or completes
-  one that takes arguments. Once you've typed a complete command name, its
-  arguments expand below it — each flag/param on its own line, tagged
-  optional/required, with a short description — and stay there while you fill
-  them in
+  completes the highlighted command into the prompt, and pressing it again
+  cycles through the matches (**Shift-Tab** goes back); Enter runs a no-arg
+  command immediately or completes one that takes arguments. A completed command
+  sits in the prompt as a pill: **Backspace** removes it whole and puts back what
+  you had typed, so a wrong pick is one key to undo. Once the command is
+  committed (completed, or typed and followed by a space), its arguments expand
+  below it — each flag/param on its own line, tagged optional/required, with a
+  short description — and stay there while you fill them in
 - **Custom palettes** — define your own with a single JSON file, bind to any key
 - **Hide built-ins** — declutter the default palette via `hidden.json`
 - **Mobile-aware** — auto-fullscreens on narrow terminals (Moshi / Blink on iOS)
@@ -268,8 +270,9 @@ cargo install --path .
 - **Up/Down arrows** or **Ctrl+P / Ctrl+N** to move selection.
 - **PageUp / PageDown** jump 10 rows.
 - **Enter** to run the selected command.
-- **Tab / Shift-Tab** (in the `command-prompt` palette) complete a command into
-  the prompt and cycle forward/backward through the matches.
+- **Tab / Shift-Tab** (in the `command-prompt` palette) complete the highlighted
+  command into the prompt, then cycle forward/backward through the matches.
+  **Backspace** right after a completed command removes it whole.
 - **Alt+= / Alt+-** (or **Alt+Up / Alt+Down**) in *Find Pane* grow/shrink the
   popup — see [Popup width](#via-tpm-tmux-plugin-manager) above.
 - **Esc** to cancel (or pop back one level in a nested palette).
@@ -365,8 +368,9 @@ terminal's own colorscheme. See the bundled `terminal` theme.
 - A new `command-prompt` palette replaces tmux's `prefix + :` prompt: type any
   tmux command to run it, with every command from `tmux list-commands` searchable
   as a suggestion, grouped by topic and icon-tagged by verb for browsing.
-  Selecting one runs it or completes it into the prompt; Tab cycles through
-  matches; and once you've typed a full command name its arguments expand
+  Selecting one runs it or completes it into the prompt; Tab completes the
+  highlighted match and cycles on from there; a completed command is a pill that
+  Backspace removes whole; and once a command is committed its arguments expand
   (optional/required, with descriptions) and stay expanded while you type them —
   none of which the original had.
 - Each command in that palette carries a one-line description of what it does.

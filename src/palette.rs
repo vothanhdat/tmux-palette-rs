@@ -54,6 +54,15 @@ struct Completion {
     candidates: Vec<String>,
     index: usize,
     applied: Vec<char>,
+    stem: Vec<char>,
+}
+
+/// The last completion written into the input (by Tab, or Enter on a row that
+/// fills), and the text it replaced — deleting its pill puts that text back, so
+/// a wrong pick returns you to the same matches.
+struct Completed {
+    text: Vec<char>,
+    stem: Vec<char>,
 }
 
 fn apply_user_overrides(items: Vec<Item>) -> Vec<Item> {
@@ -194,6 +203,7 @@ pub struct Runner {
     esc_action: Option<EscAction>,
     stack: Vec<NavState>,
     completion: Option<Completion>,
+    completed: Option<Completed>,
 
     /// Read once — `render` runs on every keystroke and must not touch the disk.
     preview_enabled: bool,
@@ -256,6 +266,7 @@ impl Runner {
             esc_action: None,
             stack: Vec::new(),
             completion: None,
+            completed: None,
             preview_enabled: sizing.preview != Some(false),
             preview_refresh_ms: sizing.preview_refresh.unwrap_or(DEFAULT_PREVIEW_REFRESH_MS),
             last_frame: String::new(),
@@ -308,6 +319,7 @@ impl Runner {
             selection_anchor: self.selection_anchor,
         });
         self.load_def(next);
+        self.completed = None;
         self.current_name = name.to_string();
         self.selected = 0;
         self.scroll = 0;
@@ -322,6 +334,7 @@ impl Runner {
             self.exit_now();
         };
         self.load_def(prev.def);
+        self.completed = None;
         self.current_name = prev.name;
         self.selected = prev.selected;
         self.scroll = prev.scroll;
@@ -340,9 +353,23 @@ impl Runner {
             return drop_query_only(&self.items);
         }
         if let Some(f) = &self.current_def.filter {
-            return f(&self.items, needle);
+            // Keep a trailing space: to the command prompt it is what commits
+            // to a command name, as opposed to still typing one.
+            let raw: String = self.filter.iter().collect();
+            return f(&self.items, raw.trim_start());
         }
         default_filter(&self.items, needle)
+    }
+
+    /// Chars of the input drawn and edited as one pill (0 when there is none).
+    fn chip_len(&self) -> usize {
+        let Some(chip) = &self.current_def.chip else {
+            return 0;
+        };
+        let input: String = self.filter.iter().collect();
+        chip(&self.items, &input)
+            .filter(|&n| n > 0 && n < self.filter.len())
+            .unwrap_or(0)
     }
 
     fn ensure_selectable(&mut self, vis: &[Item]) {
@@ -510,6 +537,7 @@ impl Runner {
             &colors,
             sel_start,
             sel_end,
+            self.chip_len(),
         ));
         inner.push(blank.clone());
         inner.extend(body.lines);
@@ -680,8 +708,12 @@ impl Runner {
                 self.dispatch_popup_action(&p);
             }
             Action::Fill(text) => {
-                let text = text.clone();
-                self.set_input(&text);
+                let stem = self.filter.clone();
+                self.set_input(text);
+                self.completed = Some(Completed {
+                    text: self.filter.clone(),
+                    stem,
+                });
                 self.render();
             }
             _ => self.dispatch_direct_action(item),
@@ -699,10 +731,13 @@ impl Runner {
     }
 
     /// Tab / Shift-Tab: cycle through the completions of the typed stem. The
-    /// first press captures the candidate list (the completable items currently
-    /// visible) so cycling survives the input changing under it; a `step` of +1
-    /// advances, -1 goes back. Any other keystroke clears the cycle.
-    fn cycle_completion(&mut self, step: i64, vis: &[Item]) {
+    /// first press completes the highlighted row — or, when that row has no
+    /// completion, the first (Tab) or last (Shift-Tab) one — and captures the
+    /// candidate list (the completable items currently visible) so cycling
+    /// survives the input changing under it; later presses step +1 or -1 from
+    /// there. Any other keystroke clears the cycle. Returns whether the input
+    /// changed.
+    fn cycle_completion(&mut self, step: i64, vis: &[Item]) -> bool {
         let continuing = self
             .completion
             .as_ref()
@@ -711,29 +746,41 @@ impl Runner {
             let candidates: Vec<String> = vis.iter().filter_map(|i| i.complete.clone()).collect();
             if candidates.is_empty() {
                 self.completion = None;
-                return;
+                return false;
             }
-            let index = if step < 0 { candidates.len() - 1 } else { 0 };
+            let highlighted = vis
+                .get(self.selected)
+                .filter(|i| i.complete.is_some())
+                .map(|_| {
+                    vis[..self.selected]
+                        .iter()
+                        .filter(|i| i.complete.is_some())
+                        .count()
+                });
+            let index = highlighted.unwrap_or(if step < 0 { candidates.len() - 1 } else { 0 });
             self.completion = Some(Completion {
                 candidates,
                 index,
                 applied: Vec::new(),
+                stem: self.filter.clone(),
             });
         } else if let Some(c) = self.completion.as_mut() {
             let n = c.candidates.len() as i64;
             c.index = (((c.index as i64 + step) % n + n) % n) as usize;
         }
-        let text = self
-            .completion
-            .as_ref()
-            .map(|c| c.candidates[c.index].clone());
-        if let Some(text) = text {
-            self.set_input(&text);
-            if let Some(c) = self.completion.as_mut() {
-                c.applied = self.filter.clone();
-            }
-            self.render();
+        let Some(c) = self.completion.as_ref() else {
+            return false;
+        };
+        let (text, stem) = (c.candidates[c.index].clone(), c.stem.clone());
+        self.set_input(&text);
+        if let Some(c) = self.completion.as_mut() {
+            c.applied = self.filter.clone();
         }
+        self.completed = Some(Completed {
+            text: self.filter.clone(),
+            stem,
+        });
+        true
     }
 
     fn esc_pressed(&mut self) {
@@ -885,7 +932,59 @@ impl Runner {
         }
     }
 
+    /// Keys that treat the pill as one unit: Left/Right step over it rather
+    /// than into it, and Backspace (or word-delete) just after it, or Delete
+    /// just before it, removes it whole. Everything else edits as usual.
+    fn handle_chip_key(&mut self, key: &str) -> bool {
+        let n = self.chip_len();
+        if n == 0 || self.sel_range().is_some() {
+            return false;
+        }
+        let cursor = self.filter_cursor;
+        match key {
+            "\x1b[D" if cursor > 0 && cursor <= n => self.filter_cursor = 0,
+            "\x1b[C" if cursor < n => self.filter_cursor = n,
+            "\x7f" | "\x08" | "\x1b\x7f" | "\x1b\x08" | "\x17" if cursor > 0 && cursor <= n + 1 => {
+                self.delete_chip(n)
+            }
+            "\x1b[3~" if cursor < n => self.delete_chip(n),
+            _ => return false,
+        }
+        self.selection_anchor = None;
+        true
+    }
+
+    /// Remove the pill and the space that committed it. When that empties the
+    /// input and the pill came from a completion, put back the text it
+    /// replaced and highlight the row it came from, ready for another pick.
+    fn delete_chip(&mut self, n: usize) {
+        let end = (n + 1).min(self.filter.len());
+        let removed: String = self.filter.drain(..end).collect();
+        self.filter_cursor = 0;
+        self.selected = 0;
+        self.scroll = 0;
+        if !self.filter.is_empty() {
+            return;
+        }
+        let Some(done) = self.completed.take() else {
+            return;
+        };
+        if done.text.iter().collect::<String>() != removed {
+            return;
+        }
+        self.filter = done.stem;
+        self.filter_cursor = self.filter.len();
+        self.selected = self
+            .visible()
+            .iter()
+            .position(|i| i.complete.as_deref() == Some(removed.as_str()))
+            .unwrap_or(0);
+    }
+
     fn handle_edit_key(&mut self, key: &str) -> bool {
+        if self.handle_chip_key(key) {
+            return true;
+        }
         // ---- cursor movement (clears selection on plain moves) ----
         match key {
             "\x1b[D" => {
@@ -995,12 +1094,11 @@ impl Runner {
     }
 
     fn handle_key(&mut self, key: &str, vis: &[Item]) {
-        if key == "\t" {
-            self.cycle_completion(1, vis);
-            return;
-        }
-        if key == "\x1b[Z" {
-            self.cycle_completion(-1, vis);
+        if key == "\t" || key == "\x1b[Z" {
+            let step = if key == "\t" { 1 } else { -1 };
+            if self.cycle_completion(step, vis) {
+                self.render();
+            }
             return;
         }
         if let Some(dir) = resize_dir(key) {
@@ -1161,6 +1259,115 @@ mod tests {
             .map(|i| i.title)
             .collect();
         assert_eq!(resting, vec!["Split".to_string(), "Find Pane".to_string()]);
+    }
+
+    /// A command-prompt-shaped runner: three completable commands, the first
+    /// word a pill once a space commits to one of them.
+    fn completing_runner() -> Runner {
+        let cmd = |name: &str| Item {
+            title: name.to_string(),
+            complete: Some(format!("{} ", name)),
+            ..Default::default()
+        };
+        let def = PaletteDef {
+            items: crate::types::ItemsSource::Static(vec![
+                cmd("rename-session"),
+                cmd("rename-window"),
+                cmd("respawn-window"),
+            ]),
+            chip: Some(Rc::new(|items: &[Item], input: &str| {
+                let end = input.find(' ')?;
+                items.iter().any(|i| i.title == input[..end]).then_some(end)
+            })),
+            ..Default::default()
+        };
+        Runner::new(def, None, "test")
+    }
+
+    fn input(r: &Runner) -> String {
+        r.filter.iter().collect()
+    }
+
+    fn type_text(r: &mut Runner, text: &str) {
+        assert!(r.handle_edit_key(text));
+    }
+
+    #[test]
+    fn tab_completes_the_highlighted_row_then_cycles_on() {
+        let mut r = completing_runner();
+        type_text(&mut r, "re");
+        let vis = r.visible();
+        r.selected = 1;
+        assert!(r.cycle_completion(1, &vis));
+        assert_eq!(input(&r), "rename-window ");
+        let vis = r.visible();
+        assert!(r.cycle_completion(1, &vis));
+        assert_eq!(input(&r), "respawn-window ");
+        let vis = r.visible();
+        assert!(r.cycle_completion(-1, &vis));
+        assert_eq!(input(&r), "rename-window ");
+    }
+
+    #[test]
+    fn tab_with_nothing_completable_highlighted_starts_at_an_end() {
+        let mut r = completing_runner();
+        type_text(&mut r, "re");
+        let mut vis = r.visible();
+        vis[0].complete = None; // e.g. the command prompt's "Run:" row
+        r.selected = 0;
+        assert!(r.cycle_completion(1, &vis));
+        assert_eq!(input(&r), "rename-window ");
+        r.completion = None;
+        r.set_input("re");
+        assert!(r.cycle_completion(-1, &vis));
+        assert_eq!(input(&r), "respawn-window ");
+    }
+
+    #[test]
+    fn backspace_after_a_completed_pill_restores_what_was_typed() {
+        let mut r = completing_runner();
+        type_text(&mut r, "ren");
+        let vis = r.visible();
+        r.selected = 1;
+        r.cycle_completion(1, &vis);
+        assert_eq!((input(&r).as_str(), r.chip_len()), ("rename-window ", 13));
+
+        assert!(r.handle_edit_key("\x7f"));
+        assert_eq!(input(&r), "ren");
+        assert_eq!(r.filter_cursor, 3);
+        // The highlight goes back to the row the pill came from.
+        assert_eq!(r.visible()[r.selected].title, "rename-window");
+    }
+
+    #[test]
+    fn a_typed_pill_deletes_whole_and_takes_its_space() {
+        let mut r = completing_runner();
+        type_text(&mut r, "rename-session -t work");
+        assert_eq!(r.chip_len(), 14);
+        // Mid-arguments, Backspace edits as usual.
+        assert!(r.handle_edit_key("\x7f"));
+        assert_eq!(input(&r), "rename-session -t wor");
+        // Right after the pill's space it takes the pill, leaving the rest.
+        r.filter_cursor = 15;
+        assert!(r.handle_edit_key("\x7f"));
+        assert_eq!((input(&r).as_str(), r.filter_cursor), ("-t wor", 0));
+    }
+
+    #[test]
+    fn arrows_step_over_the_pill() {
+        let mut r = completing_runner();
+        type_text(&mut r, "rename-window x");
+        r.filter_cursor = 14; // after the space
+        r.handle_edit_key("\x1b[D");
+        assert_eq!(r.filter_cursor, 13);
+        r.handle_edit_key("\x1b[D");
+        assert_eq!(r.filter_cursor, 0);
+        r.handle_edit_key("\x1b[C");
+        assert_eq!(r.filter_cursor, 13);
+        // Delete in front of the pill removes it too.
+        r.filter_cursor = 0;
+        r.handle_edit_key("\x1b[3~");
+        assert_eq!(input(&r), "x");
     }
 
     #[test]
