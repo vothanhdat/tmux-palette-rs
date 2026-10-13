@@ -189,6 +189,11 @@ pub type ChipFn = Rc<dyn Fn(&[Item], &str) -> Option<usize>>;
 /// padding that fills the line out to the column width loses the panel color.
 pub type PreviewFn = Rc<dyn Fn(Option<&Item>, &PreviewCtx) -> Vec<String>>;
 
+/// Builds the strip under the list that describes the highlighted item, under
+/// the same contract as [`PreviewFn`]: at most `height` lines, each ending on
+/// `colors.panel`.
+pub type DetailsFn = Rc<dyn Fn(Option<&Item>, &PreviewCtx) -> Vec<String>>;
+
 #[derive(Clone)]
 pub struct PaletteDef {
     pub title: Option<String>,
@@ -211,6 +216,9 @@ pub struct PaletteDef {
     /// as one unit: arrows step over it and Backspace removes it whole. The
     /// command prompt's is the command name, once a space commits to it.
     pub chip: Option<ChipFn>,
+    /// A strip under the list describing the highlighted item (the command
+    /// prompt explains the command), shown when the popup has rows to spare.
+    pub details: Option<DetailsFn>,
 }
 
 impl Default for PaletteDef {
@@ -227,6 +235,7 @@ impl Default for PaletteDef {
             initial_selected: None,
             preview: None,
             chip: None,
+            details: None,
         }
     }
 }

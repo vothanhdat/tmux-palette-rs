@@ -482,6 +482,23 @@ pub fn compose_list_body<F: Fn(&Row, bool) -> String>(
     ListBody { lines, row_actions }
 }
 
+/// The details strip under the list: `rows` lines of the palette's content on
+/// the panel background, cut to the body width and padded out with blanks.
+pub fn compose_details(
+    lines: &[String],
+    rows: usize,
+    body_width: i64,
+    pad_x: i64,
+    colors: &Colors,
+) -> Vec<String> {
+    (0..rows)
+        .map(|i| {
+            let content = lines.get(i).map_or("", |s| s.as_str());
+            body_line(content, false, body_width, pad_x, colors, None)
+        })
+        .collect()
+}
+
 pub fn compose_footer(footer_text: &str, pad_x: i64, body_width: i64, colors: &Colors) -> String {
     format!(
         "{}{}{}{}{}{}{}",

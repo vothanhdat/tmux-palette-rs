@@ -15,7 +15,9 @@ cd "$(dirname "$0")/.."
 for tool in vhs tmux git python3; do
   command -v "$tool" >/dev/null || { echo "record: '$tool' not found" >&2; exit 1; }
 done
-if command -v fc-list >/dev/null && ! fc-list | grep -qi "JetBrainsMono Nerd Font Mono"; then
+# grep reads to the end (no -q): quitting early would SIGPIPE fc-list, and
+# pipefail would read that as "not installed".
+if command -v fc-list >/dev/null && ! fc-list | grep -i "JetBrainsMono Nerd Font Mono" >/dev/null; then
   echo "record: JetBrainsMono Nerd Font Mono is not installed; icons will render as boxes" >&2
 fi
 

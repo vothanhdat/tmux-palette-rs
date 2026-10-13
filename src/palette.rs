@@ -13,7 +13,7 @@ use crate::raw::{
     self, is_interactive, read_stdin, terminal_size, wait_stdin, write_stdout, RawMode,
 };
 use crate::render::{
-    build_rows, compose_footer, compose_header, compose_list_body, compose_search,
+    build_rows, compose_details, compose_footer, compose_header, compose_list_body, compose_search,
     first_selectable, is_selectable, render_category, render_default_item, split_body, step,
     PreviewCol, Row, RowAction,
 };
@@ -29,6 +29,12 @@ pub type PaletteLoader = Rc<dyn Fn(&str) -> Option<PaletteDef>>;
 /// `previewRefresh` says otherwise: often enough to watch a pane work, while an
 /// idle one costs only a capture per tick (`refresh` writes nothing then).
 const DEFAULT_PREVIEW_REFRESH_MS: i64 = 250;
+
+/// Rows a details strip takes from the bottom of the list.
+const DETAILS_ROWS: usize = 4;
+/// The list keeps at least this many rows; a popup too short for both drops
+/// the strip.
+const MIN_LIST_ROWS: usize = 6;
 
 struct NavState {
     def: PaletteDef,
@@ -424,7 +430,12 @@ impl Runner {
 
         let bordered = std::env::var("TMUX_PALETTE_BORDERED").ok().as_deref() == Some("1");
         let chrome_rows = if bordered { 5 } else { 7 };
-        let list_height = (height - chrome_rows).max(1) as usize;
+        let body_height = (height - chrome_rows).max(1) as usize;
+        let details_rows = match self.current_def.details {
+            Some(_) if body_height >= MIN_LIST_ROWS + DETAILS_ROWS => DETAILS_ROWS,
+            _ => 0,
+        };
+        let list_height = body_height - details_rows;
         self.scroll = clamp_scroll(&rows, list_height, self.selected, self.scroll);
         let scroll = self.scroll;
 
@@ -541,6 +552,28 @@ impl Runner {
         ));
         inner.push(blank.clone());
         inner.extend(body.lines);
+        if let Some(build) = self
+            .current_def
+            .details
+            .clone()
+            .filter(|_| details_rows > 0)
+        {
+            let lines = build(
+                vis.get(self.selected),
+                &PreviewCtx {
+                    colors: &colors,
+                    width: body_width,
+                    height: details_rows as i64,
+                },
+            );
+            inner.extend(compose_details(
+                &lines,
+                details_rows,
+                body_width,
+                pad_x,
+                &colors,
+            ));
+        }
         inner.push(blank.clone());
         inner.push(compose_footer(&footer_text, pad_x, body_width, &colors));
 

@@ -59,8 +59,11 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
   sits in the prompt as a pill: **Backspace** removes it whole and puts back what
   you had typed, so a wrong pick is one key to undo. Once the command is
   committed (completed, or typed and followed by a space), its arguments expand
-  below it — each flag/param on its own line, tagged optional/required, with a
-  short description — and stay there while you fill them in
+  below it — every flag on its own line, tagged optional/required and described
+  for *that* command (`split-window -h` reads "side by side (left | right)") —
+  and stay there while you fill them in, ticking off the flags you've typed. A
+  strip at the bottom explains the highlighted command in a sentence or two,
+  gives an example, and shows the keys you have bound to it
 - **Custom palettes** — define your own with a single JSON file, bind to any key
 - **Hide built-ins** — declutter the default palette via `hidden.json`
 - **Mobile-aware** — auto-fullscreens on narrow terminals (Moshi / Blink on iOS)
@@ -87,10 +90,10 @@ The [website](https://vothanhdat.github.io/tmux-palette-rs/) plays them as video
 </details>
 
 <details>
-<summary><b>Command prompt</b> — <code>prefix + :</code> with every tmux command, described, with argument help</summary>
+<summary><b>Command prompt</b> — <code>prefix + :</code> with every tmux command explained, every flag described</summary>
 <br>
 <img src="docs/media/command-prompt.gif" width="100%"
-     alt="prefix + : opens Run Command: commands are grouped and described, typing 'split-window ' expands its flags, Enter splits the pane, and Tab completes rename-window">
+     alt="prefix + : opens Run Command: a strip under the grouped list explains each highlighted command; Tab turns 'spl' into a split-window pill whose flags expand, described and ticked off as -h -l 35% is typed; Enter splits the pane; Backspace takes back a rename-session pick so Tab can complete rename-window instead">
 </details>
 
 <details>
@@ -373,7 +376,10 @@ terminal's own colorscheme. See the bundled `terminal` theme.
   Backspace removes whole; and once a command is committed its arguments expand
   (optional/required, with descriptions) and stay expanded while you type them —
   none of which the original had.
-- Each command in that palette carries a one-line description of what it does.
+- Each command in that palette carries a one-line description of what it does,
+  and a details strip with a longer explanation, an example and your key
+  bindings for it. Every flag of every command (tmux 3.4 through the current
+  development version) has its own description, written from the man page.
   tmux publishes no such text — `list-commands` gives only `name (alias) usage` —
   so the palette bundles one per command. The usage string it *does* give is no
   substitute: `new-pane`'s runs to 269 characters, and 26 of the 91 commands have
