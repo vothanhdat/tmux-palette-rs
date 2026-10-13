@@ -1,0 +1,16 @@
+# Shell for the demo panes: a short, colored prompt and nothing from the host.
+export PATH="$TMUX_PALETTE_DEMO/env/bin:$PATH"
+export LS_COLORS='di=1;34:ln=36:ex=32'
+if ls --color=auto / >/dev/null 2>&1; then
+  alias ls='ls --color=auto' # GNU, and macOS 13+
+else
+  alias ls='ls -G'
+fi
+
+__branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null; }
+__prompt() {
+  local b; b="$(__branch)"
+  PS1="\[\e[1;34m\]\w\[\e[0m\]${b:+ \[\e[35m\]$b\[\e[0m\]} \[\e[32m\]❯\[\e[0m\] "
+}
+PROMPT_COMMAND=__prompt
+HISTFILE=/dev/null
