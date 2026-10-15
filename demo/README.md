@@ -41,3 +41,27 @@ then `demo/env/setup.sh --kill` when done.
 
 VHS can't type every key: use `Alt+"="` rather than `Alt+=`, and bind
 demo-only shortcuts in `setup.sh` when a tape needs a key VHS lacks.
+
+## The vertical short
+
+[`docs/media/short.mp4`](../docs/media/short.mp4) is a 1080×1920 clip for
+YouTube Shorts, TikTok and Reels. It has six real recordings, each under a
+caption, and a closing card with the install line.
+
+```bash
+demo/short/make.sh             # record the scenes, then compose
+demo/short/make.sh --compose   # re-compose from the last recording (e.g. after a caption edit)
+```
+
+It needs everything above plus Chromium or Chrome (set `CHROME=` if it isn't
+found), which renders the stills.
+
+| File | Role |
+|------|------|
+| `short/settings.tape`, `short/attach.tape` | A tall, narrow terminal (about 68 columns) with a big font, so it reads on a phone. The code window is stacked instead of side by side. |
+| `short/<n>-*.tape` | One scene each, recorded to `target/short/`. |
+| `short/cards.html` | The backdrop, the captions (the `SCENES` list), the rounded-corner mask and the closing card. Opening it in a browser with `#cap=1` or `#outro` shows a layer. |
+| `short/make.sh` | Records the scenes and renders the cards. It masks each clip into the backdrop's terminal slot and fades its caption in. Then it joins the scenes with cuts, crossfades into the closing card and adds a silent audio track. |
+
+The video has no sound. Add music in the app when you post, from its sound
+library.

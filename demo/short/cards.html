@@ -1,0 +1,214 @@
+<!doctype html>
+<!--
+  The still layers of the vertical short, rendered to PNG by make.sh with
+  headless Chromium. The URL hash picks the layer:
+
+    #bg          backdrop: glow, brand, the terminal's shadow, repo link
+    #cap=N       caption for scene N (transparent, faded in over the clip)
+    #mask        rounded-corner alpha mask for the terminal clip
+    #outro       closing card
+
+  Fonts are the system's Inter and JetBrainsMono Nerd Font Mono. Colors are
+  Catppuccin Mocha, to match the recorded terminal. The terminal slot below
+  must match SLOT_* in make.sh.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --crust: #11111b; --mantle: #181825; --base: #1e1e2e;
+    --s0: #313244; --s1: #45475a; --ov0: #6c7086;
+    --sub: #a6adc8; --text: #cdd6f4;
+    --mauve: #cba6f7; --pink: #f5c2e7; --blue: #89b4fa; --yellow: #f9e2af; --green: #a6e3a1;
+    --slot-x: 24px; --slot-y: 500px; --slot-w: 1032px; --slot-h: 1120px; --slot-r: 14px;
+    --mono: "JetBrainsMono Nerd Font Mono", "JetBrains Mono", monospace;
+    --sans: "Inter", system-ui, sans-serif;
+    --display: "Inter Display", "Inter", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: transparent; }
+  body { font-family: var(--sans); color: var(--text); -webkit-font-smoothing: antialiased; }
+  .layer { position: absolute; inset: 0; display: none; }
+  body[data-layer="bg"] #bg, body[data-layer="cap"] #cap,
+  body[data-layer="outro"] #outro { display: block; }
+  body[data-layer="mask"] #mask { display: block; }
+  body[data-layer="mask"] { width: 1032px; height: 1120px; }
+
+  /* ---- backdrop ---------------------------------------------------------- */
+  .backdrop {
+    position: absolute; inset: 0; background: var(--crust);
+    background-image:
+      radial-gradient(900px 700px at 8% 4%, rgb(203 166 247 / 0.22), transparent 70%),
+      radial-gradient(800px 700px at 100% 100%, rgb(137 180 250 / 0.16), transparent 70%),
+      radial-gradient(600px 500px at 100% 30%, rgb(245 194 231 / 0.08), transparent 70%);
+  }
+  .grid {
+    position: absolute; inset: 0; opacity: 0.35;
+    background-image:
+      linear-gradient(rgb(255 255 255 / 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+    background-size: 54px 54px;
+    mask-image: linear-gradient(to bottom, black, transparent 40%, transparent 70%, black);
+  }
+  .shadow {
+    position: absolute; left: var(--slot-x); top: var(--slot-y);
+    width: var(--slot-w); height: var(--slot-h); border-radius: var(--slot-r);
+    background: var(--base);
+    box-shadow: 0 40px 90px rgb(0 0 0 / 0.65), 0 0 0 1.5px rgb(203 166 247 / 0.28),
+                0 0 120px rgb(203 166 247 / 0.12);
+  }
+  .brand {
+    position: absolute; left: 48px; top: 148px; display: flex; align-items: center; gap: 18px;
+    font: 700 34px/1 var(--sans); letter-spacing: -0.5px;
+  }
+  .logo {
+    width: 58px; height: 58px; border-radius: 16px; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--mauve), var(--blue));
+    color: var(--crust); font: 800 30px/1 var(--mono);
+    box-shadow: 0 8px 24px rgb(203 166 247 / 0.35);
+  }
+  .brand small { font: 500 26px/1 var(--mono); color: var(--ov0); margin-left: 4px; }
+  .footer {
+    position: absolute; left: 0; right: 0; top: 1662px; display: flex; justify-content: center;
+    align-items: center; gap: 16px; font: 500 32px/1 var(--mono); color: var(--sub);
+  }
+  .footer svg { width: 36px; height: 36px; fill: var(--sub); }
+  .footer b { color: var(--text); font-weight: 700; }
+
+  /* ---- caption ----------------------------------------------------------- */
+  .dots { position: absolute; right: 48px; top: 172px; display: flex; gap: 12px; }
+  .dots i { width: 14px; height: 14px; border-radius: 7px; background: var(--s1); }
+  .dots i.done { background: rgb(203 166 247 / 0.45); }
+  .dots i.on { width: 40px; background: var(--mauve); }
+  .caption {
+    position: absolute; left: 48px; right: 48px; top: 236px; height: 240px;
+    display: flex; flex-direction: column; justify-content: flex-end; gap: 22px;
+  }
+  h1 {
+    font: 800 74px/1.04 var(--display); letter-spacing: -2px; color: var(--text);
+    text-wrap: balance;
+  }
+  em {
+    font-style: normal;
+    background: linear-gradient(90deg, var(--mauve), var(--pink));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 12px;
+    font: 500 34px/1.2 var(--sans); color: var(--sub);
+  }
+  kbd {
+    display: inline-flex; align-items: center; height: 52px; padding: 0 16px;
+    border-radius: 12px; background: var(--s0); color: var(--yellow);
+    border: 2px solid var(--s1); border-bottom-width: 6px;
+    font: 700 28px/1 var(--mono);
+  }
+  .plus { color: var(--ov0); font-weight: 700; }
+  .sub .gap { width: 8px; }
+
+  /* ---- mask -------------------------------------------------------------- */
+  #mask { background: #000; }
+  #mask div { position: absolute; inset: 0; border-radius: var(--slot-r); background: #fff; }
+
+  /* ---- outro ------------------------------------------------------------- */
+  #outro .center {
+    position: absolute; left: 60px; right: 60px; top: 360px;
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+  }
+  #outro .logo { width: 168px; height: 168px; border-radius: 44px; font-size: 84px; }
+  #outro h2 {
+    margin-top: 52px; font: 800 118px/1 var(--display); letter-spacing: -4px;
+  }
+  #outro .tagline { margin-top: 28px; font: 500 46px/1.25 var(--sans); color: var(--sub); }
+  .chips { margin-top: 48px; display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+  .chips span {
+    padding: 13px 22px; border-radius: 999px; background: rgb(49 50 68 / 0.75);
+    border: 2px solid var(--s1); font: 600 28px/1 var(--sans); color: var(--text);
+  }
+  .install {
+    margin-top: 76px; width: 100%; border-radius: 22px; padding: 30px 34px;
+    background: var(--base); border: 2px solid var(--s0); text-align: left;
+    box-shadow: 0 30px 70px rgb(0 0 0 / 0.5);
+  }
+  .install .label { font: 500 26px/1 var(--mono); color: var(--ov0); }
+  .install pre { margin-top: 20px; font: 500 30px/1.5 var(--mono); color: var(--text); white-space: pre-wrap; }
+  .install .k { color: var(--mauve); } .install .s { color: var(--green); } .install .c { color: var(--ov0); }
+  .star {
+    margin-top: 70px; display: flex; align-items: center; gap: 18px;
+    font: 700 40px/1 var(--sans);
+  }
+  .star .url { font: 600 34px/1 var(--mono); color: var(--sub); margin-top: 18px; }
+  .star svg { width: 46px; height: 46px; fill: var(--yellow); }
+</style>
+</head>
+<body>
+  <div id="bg" class="layer">
+    <div class="backdrop"></div>
+    <div class="grid"></div>
+    <div class="brand"><div class="logo">❯_</div>tmux-palette<small>· rs</small></div>
+    <div class="shadow"></div>
+    <div class="footer">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      <span>vothanhdat/<b>tmux-palette-rs</b></span>
+    </div>
+  </div>
+
+  <div id="cap" class="layer">
+    <div class="dots"></div>
+    <div class="caption"><h1></h1><div class="sub"></div></div>
+  </div>
+
+  <div id="mask" class="layer"><div></div></div>
+
+  <div id="outro" class="layer">
+    <div class="backdrop"></div>
+    <div class="grid"></div>
+    <div class="center">
+      <div class="logo">❯_</div>
+      <h2><em>tmux-palette</em></h2>
+      <div class="tagline">A fuzzy command palette for tmux</div>
+      <div class="chips"><span>⚡ One Rust binary</span><span>🔌 TPM plugin</span><span>📖 Open source</span></div>
+      <div class="install">
+        <div class="label"># ~/.tmux.conf</div>
+        <pre><span class="k">set</span> -g @plugin <span class="s">'vothanhdat/tmux-palette-rs'</span>
+<span class="c"># then press</span> <span class="k">Ctrl</span>+<span class="k">Space</span></pre>
+      </div>
+      <div class="star">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .25a.75.75 0 01.673.418l1.882 3.815 4.21.612a.75.75 0 01.416 1.279l-3.046 2.97.719 4.192a.75.75 0 01-1.088.791L8 12.347l-3.766 1.98a.75.75 0 01-1.088-.79l.72-4.194L.818 6.374a.75.75 0 01.416-1.28l4.21-.611L7.327.668A.75.75 0 018 .25z"/></svg>
+        Star it on GitHub
+      </div>
+      <div class="star url">github.com/vothanhdat/tmux-palette-rs</div>
+    </div>
+  </div>
+
+<script>
+  // One entry per recorded scene, in order (demo/short/<n>-*.tape).
+  const SCENES = [
+    { h: "Stop memorizing <em>tmux keybindings</em>",
+      sub: "<kbd>Ctrl</kbd><span class=plus>+</span><kbd>Space</kbd><span class=gap></span>one key opens everything" },
+    { h: "Jump to any pane by <em>typing its name</em>",
+      sub: "fuzzy search across every session" },
+    { h: "Every pane at a glance, with a <em>live preview</em>",
+      sub: "Find Pane · filter by title, command or path" },
+    { h: "Every tmux command, <em>explained</em> as you type",
+      sub: "<kbd>prefix</kbd><kbd>:</kbd><span class=gap></span>Tab completes · flags described" },
+    { h: "Switch themes with a <em>live preview</em>",
+      sub: "13 built in, or bring your own" },
+    { h: "Build your own palette from <em>any shell command</em>",
+      sub: "one small JSON file · here: git branches" },
+  ];
+
+  const hash = location.hash.slice(1);
+  const [layer, arg] = hash.split("=");
+  document.body.dataset.layer = layer || "bg";
+  if (layer === "cap") {
+    const n = Number(arg), s = SCENES[n - 1];
+    document.querySelector("h1").innerHTML = s.h;
+    document.querySelector(".sub").innerHTML = s.sub;
+    document.querySelector(".dots").innerHTML = SCENES
+      .map((_, i) => `<i class="${i + 1 === n ? "on" : i + 1 < n ? "done" : ""}"></i>`).join("");
+  }
+</script>
+</body>
+</html>
