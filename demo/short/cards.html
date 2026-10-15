@@ -3,7 +3,7 @@
   The still layers of the vertical short, rendered to PNG by make.sh with
   headless Chromium. The URL hash picks the layer:
 
-    #bg          backdrop: glow, brand, the terminal's shadow, repo link
+    #bg          backdrop: glow and the terminal's shadow
     #cap=N       caption for scene N (transparent, faded in over the clip)
     #mask        rounded-corner alpha mask for the terminal clip
     #outro       closing card
@@ -11,6 +11,11 @@
   Fonts are the system's Inter and JetBrainsMono Nerd Font Mono. Colors are
   Catppuccin Mocha, to match the recorded terminal. The terminal slot below
   must match SLOT_* in make.sh.
+
+  Layout keeps clear of the apps' own overlays: their top bar (top ~150px),
+  their buttons down the right edge, and the caption text along the bottom
+  (bottom ~450px). The terminal sits up top; the caption is centered on the
+  lower third, where it reads best.
 -->
 <html>
 <head>
@@ -21,7 +26,7 @@
     --s0: #313244; --s1: #45475a; --ov0: #6c7086;
     --sub: #a6adc8; --text: #cdd6f4;
     --mauve: #cba6f7; --pink: #f5c2e7; --blue: #89b4fa; --yellow: #f9e2af; --green: #a6e3a1;
-    --slot-x: 24px; --slot-y: 500px; --slot-w: 1032px; --slot-h: 1120px; --slot-r: 14px;
+    --slot-x: 24px; --slot-y: 150px; --slot-w: 1032px; --slot-h: 1000px; --slot-r: 14px;
     --mono: "JetBrainsMono Nerd Font Mono", "JetBrains Mono", monospace;
     --sans: "Inter", system-ui, sans-serif;
     --display: "Inter Display", "Inter", system-ui, sans-serif;
@@ -33,15 +38,15 @@
   body[data-layer="bg"] #bg, body[data-layer="cap"] #cap,
   body[data-layer="outro"] #outro { display: block; }
   body[data-layer="mask"] #mask { display: block; }
-  body[data-layer="mask"] { width: 1032px; height: 1120px; }
+  body[data-layer="mask"] { width: 1032px; height: 1000px; }
 
   /* ---- backdrop ---------------------------------------------------------- */
   .backdrop {
     position: absolute; inset: 0; background: var(--crust);
     background-image:
-      radial-gradient(900px 700px at 8% 4%, rgb(203 166 247 / 0.22), transparent 70%),
-      radial-gradient(800px 700px at 100% 100%, rgb(137 180 250 / 0.16), transparent 70%),
-      radial-gradient(600px 500px at 100% 30%, rgb(245 194 231 / 0.08), transparent 70%);
+      radial-gradient(900px 520px at 50% 68%, rgb(203 166 247 / 0.2), transparent 70%),
+      radial-gradient(800px 700px at 0% 0%, rgb(137 180 250 / 0.14), transparent 70%),
+      radial-gradient(800px 700px at 100% 100%, rgb(245 194 231 / 0.08), transparent 70%);
   }
   .grid {
     position: absolute; inset: 0; opacity: 0.35;
@@ -49,7 +54,7 @@
       linear-gradient(rgb(255 255 255 / 0.035) 1px, transparent 1px),
       linear-gradient(90deg, rgb(255 255 255 / 0.035) 1px, transparent 1px);
     background-size: 54px 54px;
-    mask-image: linear-gradient(to bottom, black, transparent 40%, transparent 70%, black);
+    mask-image: linear-gradient(to bottom, transparent 55%, black 72%, transparent 95%);
   }
   .shadow {
     position: absolute; left: var(--slot-x); top: var(--slot-y);
@@ -58,35 +63,30 @@
     box-shadow: 0 40px 90px rgb(0 0 0 / 0.65), 0 0 0 1.5px rgb(203 166 247 / 0.28),
                 0 0 120px rgb(203 166 247 / 0.12);
   }
-  .brand {
-    position: absolute; left: 48px; top: 148px; display: flex; align-items: center; gap: 18px;
-    font: 700 34px/1 var(--sans); letter-spacing: -0.5px;
-  }
   .logo {
     width: 58px; height: 58px; border-radius: 16px; display: grid; place-items: center;
     background: linear-gradient(135deg, var(--mauve), var(--blue));
     color: var(--crust); font: 800 30px/1 var(--mono);
     box-shadow: 0 8px 24px rgb(203 166 247 / 0.35);
   }
-  .brand small { font: 500 26px/1 var(--mono); color: var(--ov0); margin-left: 4px; }
-  .footer {
-    position: absolute; left: 0; right: 0; top: 1662px; display: flex; justify-content: center;
-    align-items: center; gap: 16px; font: 500 32px/1 var(--mono); color: var(--sub);
-  }
-  .footer svg { width: 36px; height: 36px; fill: var(--sub); }
-  .footer b { color: var(--text); font-weight: 700; }
 
   /* ---- caption ----------------------------------------------------------- */
-  .dots { position: absolute; right: 48px; top: 172px; display: flex; gap: 12px; }
-  .dots i { width: 14px; height: 14px; border-radius: 7px; background: var(--s1); }
-  .dots i.done { background: rgb(203 166 247 / 0.45); }
-  .dots i.on { width: 40px; background: var(--mauve); }
   .caption {
-    position: absolute; left: 48px; right: 48px; top: 236px; height: 240px;
-    display: flex; flex-direction: column; justify-content: flex-end; gap: 22px;
+    position: absolute; left: 110px; right: 110px; top: 1172px; height: 280px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 20px; text-align: center;
   }
+  .brand {
+    display: flex; align-items: center; gap: 14px;
+    font: 700 28px/1 var(--sans); letter-spacing: -0.3px; color: var(--sub);
+  }
+  .brand .logo { width: 40px; height: 40px; border-radius: 11px; font-size: 20px; box-shadow: none; }
+  .dots { display: flex; gap: 10px; margin-left: 14px; }
+  .dots i { width: 12px; height: 12px; border-radius: 6px; background: var(--s1); }
+  .dots i.done { background: rgb(203 166 247 / 0.45); }
+  .dots i.on { width: 34px; background: var(--mauve); }
   h1 {
-    font: 800 74px/1.04 var(--display); letter-spacing: -2px; color: var(--text);
+    font: 800 66px/1.06 var(--display); letter-spacing: -1.8px; color: var(--text);
     text-wrap: balance;
   }
   em {
@@ -95,8 +95,8 @@
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
   .sub {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 12px;
-    font: 500 34px/1.2 var(--sans); color: var(--sub);
+    display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px;
+    font: 500 32px/1.2 var(--sans); color: var(--sub);
   }
   kbd {
     display: inline-flex; align-items: center; height: 52px; padding: 0 16px;
@@ -113,7 +113,7 @@
 
   /* ---- outro ------------------------------------------------------------- */
   #outro .center {
-    position: absolute; left: 60px; right: 60px; top: 360px;
+    position: absolute; left: 110px; right: 110px; top: 250px;
     display: flex; flex-direction: column; align-items: center; text-align: center;
   }
   #outro .logo { width: 168px; height: 168px; border-radius: 44px; font-size: 84px; }
@@ -146,17 +146,15 @@
   <div id="bg" class="layer">
     <div class="backdrop"></div>
     <div class="grid"></div>
-    <div class="brand"><div class="logo">❯_</div>tmux-palette<small>· rs</small></div>
     <div class="shadow"></div>
-    <div class="footer">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-      <span>vothanhdat/<b>tmux-palette-rs</b></span>
-    </div>
   </div>
 
   <div id="cap" class="layer">
-    <div class="dots"></div>
-    <div class="caption"><h1></h1><div class="sub"></div></div>
+    <div class="caption">
+      <div class="brand"><div class="logo">❯_</div>tmux-palette<div class="dots"></div></div>
+      <h1></h1>
+      <div class="sub"></div>
+    </div>
   </div>
 
   <div id="mask" class="layer"><div></div></div>

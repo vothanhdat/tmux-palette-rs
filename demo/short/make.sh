@@ -20,7 +20,7 @@ cd "$(dirname "$0")/../.."
 OUT=docs/media/short.mp4
 WORK=target/short
 SCENES=(1-hook 2-jump 3-find 4-command 5-themes 6-custom)
-SLOT_X=24 SLOT_Y=500 # the terminal's place in cards.html (--slot-x/--slot-y)
+SLOT_X=24 SLOT_Y=150 # the terminal's place in cards.html (--slot-x/--slot-y)
 FPS=30
 CAPTION_IN=0.35 # caption fade/slide-in, seconds
 
@@ -66,7 +66,7 @@ render() { # render <hash> <out.png> [WxH]
 echo "==> rendering cards"
 render bg "$WORK/cards/bg.png"
 render outro "$WORK/cards/outro.png"
-render mask "$WORK/cards/mask.png" 1032,1120
+render mask "$WORK/cards/mask.png" 1032,1000
 for i in "${!SCENES[@]}"; do
   render "cap=$((i + 1))" "$WORK/cards/cap-$((i + 1)).png"
 done

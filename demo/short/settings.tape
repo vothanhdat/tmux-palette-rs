@@ -7,7 +7,7 @@ Set FontFamily "JetBrainsMono Nerd Font Mono"
 Set FontSize 25
 Set LineHeight 1.1
 Set Width 1032
-Set Height 1120
+Set Height 1000
 Set Padding 14
 Set Theme "Catppuccin Mocha"
 Set WindowBar Colorful
