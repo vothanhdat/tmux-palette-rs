@@ -46,7 +46,7 @@ demo-only shortcuts in `setup.sh` when a tape needs a key VHS lacks.
 
 [`docs/media/short.mp4`](../docs/media/short.mp4) is a 1080×1920 clip for
 YouTube Shorts, TikTok and Reels. It has six real recordings, each under a
-caption, and a closing card with the install line.
+caption, and a closing card with the install line. It also has a soundtrack.
 
 ```bash
 demo/short/make.sh             # record the scenes, then compose
@@ -54,14 +54,25 @@ demo/short/make.sh --compose   # re-compose from the last recording (e.g. after 
 ```
 
 It needs everything above plus Chromium or Chrome (set `CHROME=` if it isn't
-found), which renders the stills.
+found), which renders the stills, and Python with numpy, which makes the sound.
 
 | File | Role |
 |------|------|
 | `short/settings.tape`, `short/attach.tape` | A tall, narrow terminal (about 68 columns) with a big font, so it reads on a phone. The code window is stacked instead of side by side. |
 | `short/<n>-*.tape` | One scene each, recorded to `target/short/`. |
 | `short/cards.html` | The backdrop, the captions (the `SCENES` list), the rounded-corner mask and the closing card. Opening it in a browser with `#cap=1` or `#outro` shows a layer. |
-| `short/make.sh` | Records the scenes and renders the cards. It masks each clip into the backdrop's terminal slot and fades its caption in. Then it joins the scenes with cuts, crossfades into the closing card and adds a silent audio track. |
+| `short/audio.py` | The soundtrack, all synthesized, with no samples, so it is free to post. It also nudges each scene's length by a fraction of a second, so every cut lands on a beat. |
+| `short/make.sh` | Records the scenes, renders the cards and the soundtrack, and masks each clip into the backdrop's terminal slot under its caption. It joins the scenes on the beat and crossfades into the closing card. |
 
-The video has no sound. Add music in the app when you post, from its sound
-library.
+### The soundtrack
+
+`audio.py` writes a chill electronic track at 108 BPM: electric piano chords,
+a pad, plucked arpeggios, bass and drums. The intro is muffled and opens up
+into the drop on the first cut. The closing chord and a bell arpeggio land
+with the closing card.
+
+On top of the music, every keystroke in a scene's tape gets a key click. VHS
+drifts a little from its script, so each click goes on the frame where the
+screen actually changes: the tape's key timing is matched against the
+recording's frame-to-frame changes. A whoosh leads into each cut, and the mix is
+normalized to −14 LUFS, the level YouTube and TikTok play at.
