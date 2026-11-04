@@ -47,6 +47,10 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
   milliseconds, `0` updates only on keypresses). The panel drops away when the
   popup is too small to hold both columns; set `"preview": false` in
   `sizing.json` to turn it off.
+- **Move panes** — *Find Pane* picks any pane up and drops it anywhere: under
+  or beside another pane, swapped with it, or out into a new window, in any
+  session. The live preview keeps working while you choose, so you can look
+  before you drop. See [Move a pane](#usage) below.
 - **Command prompt** — a drop-in replacement for tmux's `prefix + :`: the
   `command-prompt` palette lets you type any tmux command and run it. Every tmux
   command (pulled live from `tmux list-commands`) is searchable by name and
@@ -278,6 +282,8 @@ cargo install --path .
   **Backspace** right after a completed command removes it whole.
 - **Alt+= / Alt+-** (or **Alt+Up / Alt+Down**) in *Find Pane* grow/shrink the
   popup — see [Popup width](#via-tpm-tmux-plugin-manager) above.
+- **Alt+m** in *Find Pane* picks the highlighted pane up to move it — see
+  [Move a pane](#usage) below.
 - **Esc** to cancel (or pop back one level in a nested palette).
 - **Mouse** works too — click rows, scroll the wheel, click `esc`.
 
@@ -289,6 +295,26 @@ session/window, running command, agent, or path (e.g. type a project name or
 `nvim`). Pick one to switch straight to it. The dedicated **Find Pane** entry
 still opens the full session/window/pane tree, with a preview of the highlighted
 pane's screen beside it.
+
+**Move a pane**: in *Find Pane*, highlight the pane to move and press **Alt+m**.
+It's picked up: marked `◆ moving`, named in the title, and the search clears so
+you can find where it goes. Highlight the destination pane (type, arrow, or
+scroll, with its live preview beside it), then:
+
+| Key | Drops the picked-up pane | tmux command |
+| --- | --- | --- |
+| **Enter** (or click) | below the highlighted pane | `join-pane` |
+| **Alt+h** | beside it, on the right | `join-pane -h` |
+| **Alt+s** | in its place, swapping the two | `swap-pane` |
+| **Alt+n** | in a new window of the highlighted pane's session | `break-pane` |
+| **Esc** | back where it was (cancels the move) | |
+
+**Alt+m** on another pane picks that one up instead; on the picked-up pane it
+puts it down. Your client stays on whatever it was showing, and the focus
+doesn't move. Moving a window's last pane closes that window, as it does
+in tmux. Resizing the popup with **Alt+= / Alt+-** keeps the pane picked up.
+The *Move Pane to...* palette is still there for sending the current pane to a
+window without opening the tree.
 
 ## How it works (the trick)
 
@@ -386,6 +412,10 @@ terminal's own colorscheme. See the bundled `terminal` theme.
   one too long for the row.
 - *Find Pane* previews the highlighted pane's live screen in a right-hand panel
   (the original listed panes without showing their contents).
+- *Find Pane* moves panes as well as jumping to them: pick any pane up with
+  **Alt+m** and drop it beside, below, in place of another pane, or into a new
+  window (the original's *Move Pane* only moved the current pane, into a
+  window).
 - Private-use glyphs — the nerd-font icons the palette and most shell prompts use
   — are measured as one cell, matching what terminals draw. The original's width
   table treated `U+F000..U+F8FF` as double-width, one hex digit off from
