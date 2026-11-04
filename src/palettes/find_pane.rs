@@ -4,15 +4,23 @@
 //! The tree sits in the left column; a preview panel on the right shows the
 //! highlighted pane's live screen, so you can tell two `bash` panes apart
 //! without switching to them.
+//!
+//! Panes can be moved from here too: Alt+m picks the highlighted pane up, and
+//! the next key drops it relative to whichever pane is highlighted then — see
+//! [`PaneMover`].
 
 use std::any::Any;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::ansi::{parse_screen, render_row, Cell};
 use crate::fuzzy::multi_fuzzy_score;
 use crate::render::{render_default_item, render_item_styled};
 use crate::tmux::{tmux, tmux_quote, tmux_raw};
-use crate::types::{Action, Colors, Item, ItemsSource, PaletteDef, PreviewCtx, RenderItemCtx};
+use crate::types::{
+    Action, Colors, Item, ItemsSource, KeyHandler, KeyOutcome, PaletteDef, PreviewCtx,
+    RenderItemCtx,
+};
 
 const SPINNER: &[char] = &[
     '*', '✳', '⠂', '⠐', '⠁', '⠉', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏',
@@ -68,6 +76,9 @@ pub struct Pane {
     pub window_active: bool,
     pub is_current: bool,
     pub target: String,
+    /// tmux's `%N` id: unlike `target`, it names the same pane however panes
+    /// are renumbered, and session names can't make it ambiguous.
+    pub id: String,
 }
 
 #[derive(Clone)]
@@ -94,7 +105,7 @@ fn data(d: ItemData) -> Option<Rc<dyn Any>> {
     Some(Rc::new(d))
 }
 
-const PANE_FORMAT: &str = "#{session_name}\t#{window_index}\t#{pane_index}\t#{window_name}\t#{pane_title}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_active}\t#{window_active}";
+const PANE_FORMAT: &str = "#{session_name}\t#{window_index}\t#{pane_index}\t#{window_name}\t#{pane_title}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_active}\t#{window_active}\t#{pane_id}";
 
 fn parse_pane_line(line: &str, current_pane: &str) -> Option<Pane> {
     let f: Vec<&str> = line.split('\t').collect();
@@ -110,6 +121,7 @@ fn parse_pane_line(line: &str, current_pane: &str) -> Option<Pane> {
     let path = f.get(6).copied().unwrap_or("");
     let pane_active = f.get(7).copied().unwrap_or("");
     let window_active = f.get(8).copied().unwrap_or("");
+    let id = f.get(9).copied().unwrap_or("");
 
     let target = format!("{}:{}.{}", session, window_index, pane_index);
     let title = if pane_title.is_empty() {
@@ -134,6 +146,7 @@ fn parse_pane_line(line: &str, current_pane: &str) -> Option<Pane> {
         window_active: window_active == "1",
         is_current: target == current_pane,
         target,
+        id: id.to_string(),
     })
 }
 
@@ -460,8 +473,10 @@ fn render_window(
     )
 }
 
-fn pane_marker(p: &Pane, colors: &Colors) -> (String, char) {
-    if p.is_current {
+fn pane_marker(p: &Pane, picked: bool, colors: &Colors) -> (String, char) {
+    if picked {
+        (colors.accent.clone(), PICKED_MARKER)
+    } else if p.is_current {
         (colors.accent.clone(), '▶')
     } else if p.pane_active {
         (ACTIVE_PANE_FG.to_string(), '●')
@@ -470,16 +485,22 @@ fn pane_marker(p: &Pane, colors: &Colors) -> (String, char) {
     }
 }
 
+/// Marker for the pane that is picked up, waiting to be dropped.
+const PICKED_MARKER: char = '◆';
+/// Tag after the picked-up pane's title.
+const PICKED_TAG: &str = "moving";
+
 fn render_pane(
     p: &Pane,
     tree_prefix: &str,
     colors: &Colors,
     row_bg: &str,
     active: bool,
+    picked: bool,
     width: i64,
 ) -> String {
-    let (marker_color, marker_char) = pane_marker(p, colors);
-    let title_style = if active {
+    let (marker_color, marker_char) = pane_marker(p, picked, colors);
+    let title_style = if active || picked {
         format!("{}{}", colors.bold, colors.fg)
     } else if p.is_current {
         colors.fg.clone()
@@ -508,6 +529,13 @@ fn render_pane(
         left += &format!("  {}{}{}{}", colors.muted, p.agent, colors.reset, row_bg);
         left_plain_w += 2 + clen(&p.agent);
     }
+    if picked {
+        left += &format!(
+            "  {}{}{}{}{}",
+            colors.accent, colors.bold, PICKED_TAG, colors.reset, row_bg
+        );
+        left_plain_w += 2 + clen(PICKED_TAG);
+    }
 
     let right_text = format!("{}.{}", p.window_index, p.pane_index);
     let right = format!("{}{}{}{}", colors.muted, right_text, colors.reset, row_bg);
@@ -515,7 +543,7 @@ fn render_pane(
     format!("{}{}{}", left, " ".repeat(gap as usize), right)
 }
 
-fn render_item_impl(item: &Item, ctx: &RenderItemCtx) -> String {
+fn render_item_impl(item: &Item, ctx: &RenderItemCtx, mover: &PaneMover) -> String {
     let colors = ctx.colors;
     let active = ctx.active;
     let row_bg = if active {
@@ -542,9 +570,175 @@ fn render_item_impl(item: &Item, ctx: &RenderItemCtx) -> String {
             tree_prefix,
             ..
         } => render_window(window_name, tree_prefix, colors, row_bg, active),
-        ItemData::Pane { pane, tree_prefix } => {
-            render_pane(pane, tree_prefix, colors, row_bg, active, ctx.width)
+        ItemData::Pane { pane, tree_prefix } => render_pane(
+            pane,
+            tree_prefix,
+            colors,
+            row_bg,
+            active,
+            mover.is_picked(pane),
+            ctx.width,
+        ),
+    }
+}
+
+// ---- moving a pane: pick it up, drop it elsewhere ---------------------------
+
+/// Alt+m: pick the highlighted pane up (again on it: put it back down).
+const KEY_PICK: &str = "\x1bm";
+/// Alt+h: drop it beside the highlighted pane.
+const KEY_BESIDE: &str = "\x1bh";
+/// Alt+s: swap it with the highlighted pane.
+const KEY_SWAP: &str = "\x1bs";
+/// Alt+n: drop it in a new window, in the highlighted pane's session.
+const KEY_NEW_WINDOW: &str = "\x1bn";
+
+/// Where a picked-up pane is dropped, relative to the highlighted one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Placement {
+    /// Split the highlighted pane and take the bottom half (Enter).
+    Below,
+    /// Split it side by side and take the right half (Alt+h).
+    Beside,
+    /// Trade places with it (Alt+s).
+    Swap,
+    /// Break out into a new window in its session (Alt+n).
+    NewWindow,
+}
+
+/// How tmux is told which pane: its `%N` id when the listing had one.
+fn pane_ref(p: &Pane) -> &str {
+    if p.id.is_empty() {
+        &p.target
+    } else {
+        &p.id
+    }
+}
+
+fn same_pane(a: &Pane, b: &Pane) -> bool {
+    pane_ref(a) == pane_ref(b)
+}
+
+/// The tmux command that drops `src` at `dst`, or `None` when it would be
+/// dropped onto itself. `-d` everywhere: the client stays on what it was
+/// showing, and moving a pane never steals the focus.
+fn drop_action(src: &Pane, dst: &Pane, how: Placement) -> Option<Action> {
+    let s = tmux_quote(pane_ref(src));
+    let d = tmux_quote(pane_ref(dst));
+    let cmd = match how {
+        // Any pane may go to a new window, its own session's included.
+        Placement::NewWindow => format!(
+            "break-pane -d -s {} -t {}",
+            s,
+            tmux_quote(&format!("{}:", dst.session))
+        ),
+        _ if same_pane(src, dst) => return None,
+        Placement::Below => format!("join-pane -d -s {} -t {}", s, d),
+        Placement::Beside => format!("join-pane -d -h -s {} -t {}", s, d),
+        Placement::Swap => format!("swap-pane -d -s {} -t {}", s, d),
+    };
+    Some(Action::Tmux(cmd))
+}
+
+fn pane_of(item: Option<&Item>) -> Option<&Pane> {
+    match item?.data.as_ref()?.downcast_ref::<ItemData>()? {
+        ItemData::Pane { pane, .. } => Some(pane),
+        _ => None,
+    }
+}
+
+/// Find Pane's pick-up-and-drop. Alt+m picks the highlighted pane up and
+/// clears the search, so the next one finds the destination; then Enter,
+/// Alt+h, Alt+s or Alt+n drop it relative to the pane highlighted by then
+/// (see [`Placement`]), and Esc puts it back. Until a drop the tree works as
+/// usual, live preview included, so you can look before you drop.
+#[derive(Default)]
+pub struct PaneMover {
+    picked: RefCell<Option<Pane>>,
+}
+
+impl PaneMover {
+    fn picked(&self) -> Option<Pane> {
+        self.picked.borrow().clone()
+    }
+
+    fn is_picked(&self, p: &Pane) -> bool {
+        self.picked
+            .borrow()
+            .as_ref()
+            .is_some_and(|src| same_pane(src, p))
+    }
+
+    fn pick(&self, p: Option<&Pane>) {
+        self.picked.replace(p.cloned());
+    }
+}
+
+impl KeyHandler for PaneMover {
+    fn on_key(&self, key: &str, highlighted: Option<&Item>) -> KeyOutcome {
+        let dst = pane_of(highlighted);
+        let Some(src) = self.picked() else {
+            // Nothing picked up: Alt+m is the only key of ours.
+            if key == KEY_PICK && dst.is_some() {
+                self.pick(dst);
+                return KeyOutcome::ClearSearch;
+            }
+            return KeyOutcome::Pass;
+        };
+        let how = match key {
+            "\r" => Placement::Below,
+            KEY_BESIDE => Placement::Beside,
+            KEY_SWAP => Placement::Swap,
+            KEY_NEW_WINDOW => Placement::NewWindow,
+            // Alt+m on another pane picks that one up instead.
+            KEY_PICK if dst.is_some_and(|d| !same_pane(d, &src)) => {
+                self.pick(dst);
+                return KeyOutcome::ClearSearch;
+            }
+            // On the picked one (or nothing), or Esc: put it back down.
+            KEY_PICK | "\x1b" => {
+                self.pick(None);
+                return KeyOutcome::Redraw;
+            }
+            _ => return KeyOutcome::Pass,
+        };
+        match dst.and_then(|d| drop_action(&src, d, how)) {
+            Some(action) => KeyOutcome::Run(action),
+            // Onto itself, or with nothing highlighted: stay picked up.
+            None => KeyOutcome::Redraw,
         }
+    }
+
+    fn title(&self) -> Option<String> {
+        self.picked()
+            .map(|p| format!("Move {} ({}) to\u{2026}", p.pane_title, p.target))
+    }
+
+    fn footer(&self, selectable: usize) -> Option<String> {
+        if self.picked.borrow().is_some() {
+            return Some(
+                "enter below   alt+h beside   alt+s swap   alt+n new window   esc cancel"
+                    .to_string(),
+            );
+        }
+        if selectable == 0 {
+            return None; // the palette's "No panes"
+        }
+        let noun = if selectable == 1 { "pane" } else { "panes" };
+        Some(format!("enter jump   alt+m move   {} {}", selectable, noun))
+    }
+
+    fn save(&self) -> String {
+        self.picked()
+            .map(|p| pane_ref(&p).to_string())
+            .unwrap_or_default()
+    }
+
+    /// Look the pane up again by id: the reopened popup lists panes afresh, and
+    /// a pane that went away meanwhile is simply not picked up any more.
+    fn restore(&self, state: &str) {
+        let line = tmux(&["display-message", "-p", "-t", state, PANE_FORMAT]);
+        self.pick(parse_pane_line(&line, "").as_ref());
     }
 }
 
@@ -694,15 +888,20 @@ fn initial_selected(items: &[Item]) -> i64 {
 }
 
 pub fn find_pane() -> PaletteDef {
+    let mover = Rc::new(PaneMover::default());
+    let rows = mover.clone();
     PaletteDef {
         title: Some("Find Pane".to_string()),
         grouped: Some(false),
         empty_text: Some("No panes".to_string()),
         items: ItemsSource::Dynamic(Rc::new(build_items)),
-        render_item: Some(Rc::new(render_item_impl)),
+        render_item: Some(Rc::new(move |item: &Item, ctx: &RenderItemCtx| {
+            render_item_impl(item, ctx, &rows)
+        })),
         filter: Some(Rc::new(filter_tree)),
         initial_selected: Some(Rc::new(initial_selected)),
         preview: Some(Rc::new(preview_impl)),
+        keys: Some(mover),
         ..Default::default()
     }
 }
@@ -892,6 +1091,187 @@ mod tests {
         let session = session_item("main", &[], "main");
         assert!(preview_impl(Some(&session), &ctx).is_empty());
         assert!(preview_impl(None, &ctx).is_empty());
+    }
+
+    /// `name` at `target` with tmux id `id`, as `list-panes` would list it.
+    fn listed(target: &str, id: &str, title: &str) -> Pane {
+        let (session, rest) = target.split_once(':').unwrap();
+        let (window, pane) = rest.split_once('.').unwrap();
+        let line = format!("{session}\t{window}\t{pane}\tw\t{title}\tcmd\t/p\t0\t0\t{id}");
+        parse_pane_line(&line, "").unwrap()
+    }
+
+    fn run_cmd(outcome: KeyOutcome) -> String {
+        match outcome {
+            KeyOutcome::Run(Action::Tmux(cmd)) => cmd,
+            _ => panic!("expected a tmux command to run"),
+        }
+    }
+
+    #[test]
+    fn parses_the_pane_id() {
+        let p = listed("main:1.0", "%7", "nvim");
+        assert_eq!((p.id.as_str(), pane_ref(&p)), ("%7", "%7"));
+        // A listing without one (an older format) falls back to the target.
+        let old = parse_pane_line("main\t1\t0\tw\tt\tc\t/p\t0\t0", "").unwrap();
+        assert_eq!(pane_ref(&old), "main:1.0");
+    }
+
+    #[test]
+    fn drops_name_panes_by_id() {
+        let src = listed("main:1.0", "%1", "nvim");
+        let dst = listed("work:2.1", "%9", "logs");
+        let cmd = |how| match drop_action(&src, &dst, how) {
+            Some(Action::Tmux(c)) => c,
+            _ => panic!("expected a tmux command"),
+        };
+        assert_eq!(cmd(Placement::Below), "join-pane -d -s '%1' -t '%9'");
+        assert_eq!(cmd(Placement::Beside), "join-pane -d -h -s '%1' -t '%9'");
+        assert_eq!(cmd(Placement::Swap), "swap-pane -d -s '%1' -t '%9'");
+        // A new window goes in the highlighted pane's session.
+        assert_eq!(
+            cmd(Placement::NewWindow),
+            "break-pane -d -s '%1' -t 'work:'"
+        );
+    }
+
+    #[test]
+    fn a_pane_is_never_dropped_onto_itself() {
+        let p = listed("main:1.0", "%1", "nvim");
+        for how in [Placement::Below, Placement::Beside, Placement::Swap] {
+            assert!(drop_action(&p, &p, how).is_none(), "{how:?}");
+        }
+        // ...though it can still break out into a window of its own.
+        assert!(drop_action(&p, &p, Placement::NewWindow).is_some());
+    }
+
+    #[test]
+    fn pick_up_then_drop() {
+        let mover = PaneMover::default();
+        let src = pane_item(&listed("main:1.0", "%1", "nvim"), String::new());
+        let dst = pane_item(&listed("work:2.1", "%9", "logs"), String::new());
+
+        // Nothing picked up: Enter and typing are the runner's; Alt+m picks the
+        // highlighted pane up and starts a fresh search for the destination.
+        assert!(matches!(mover.on_key("\r", Some(&src)), KeyOutcome::Pass));
+        assert!(matches!(mover.on_key("x", Some(&src)), KeyOutcome::Pass));
+        assert!(matches!(mover.on_key(KEY_PICK, None), KeyOutcome::Pass));
+        assert!(matches!(
+            mover.on_key(KEY_PICK, Some(&src)),
+            KeyOutcome::ClearSearch
+        ));
+        assert_eq!(mover.save(), "%1");
+        assert_eq!(
+            mover.title().as_deref(),
+            Some("Move nvim (main:1.0) to\u{2026}")
+        );
+
+        // Picked up: typing still searches, and dropping it onto itself does
+        // nothing but keep it picked up.
+        assert!(matches!(mover.on_key("l", Some(&dst)), KeyOutcome::Pass));
+        assert!(matches!(mover.on_key("\r", Some(&src)), KeyOutcome::Redraw));
+        assert!(matches!(mover.on_key("\r", None), KeyOutcome::Redraw));
+        assert_eq!(mover.save(), "%1");
+
+        assert_eq!(
+            run_cmd(mover.on_key("\r", Some(&dst))),
+            "join-pane -d -s '%1' -t '%9'"
+        );
+        assert_eq!(
+            run_cmd(mover.on_key(KEY_BESIDE, Some(&dst))),
+            "join-pane -d -h -s '%1' -t '%9'"
+        );
+        assert_eq!(
+            run_cmd(mover.on_key(KEY_SWAP, Some(&dst))),
+            "swap-pane -d -s '%1' -t '%9'"
+        );
+        assert_eq!(
+            run_cmd(mover.on_key(KEY_NEW_WINDOW, Some(&dst))),
+            "break-pane -d -s '%1' -t 'work:'"
+        );
+    }
+
+    #[test]
+    fn put_back_down_or_pick_another() {
+        let mover = PaneMover::default();
+        let a = pane_item(&listed("main:1.0", "%1", "a"), String::new());
+        let b = pane_item(&listed("main:1.1", "%2", "b"), String::new());
+
+        // Esc puts it back down; the next Esc is the runner's again.
+        mover.on_key(KEY_PICK, Some(&a));
+        assert!(matches!(mover.on_key("\x1b", Some(&b)), KeyOutcome::Redraw));
+        assert_eq!(mover.save(), "");
+        assert!(mover.title().is_none());
+        assert!(matches!(mover.on_key("\x1b", Some(&b)), KeyOutcome::Pass));
+
+        // Alt+m on another pane swaps which one is picked up...
+        mover.on_key(KEY_PICK, Some(&a));
+        assert!(matches!(
+            mover.on_key(KEY_PICK, Some(&b)),
+            KeyOutcome::ClearSearch
+        ));
+        assert_eq!(mover.save(), "%2");
+        // ...and on the picked one puts it down.
+        assert!(matches!(
+            mover.on_key(KEY_PICK, Some(&b)),
+            KeyOutcome::Redraw
+        ));
+        assert_eq!(mover.save(), "");
+    }
+
+    #[test]
+    fn footer_says_what_the_keys_do() {
+        let mover = PaneMover::default();
+        assert_eq!(
+            mover.footer(1).as_deref(),
+            Some("enter jump   alt+m move   1 pane")
+        );
+        assert_eq!(
+            mover.footer(3).as_deref(),
+            Some("enter jump   alt+m move   3 panes")
+        );
+        assert_eq!(mover.footer(0), None);
+
+        let p = listed("main:1.0", "%1", "nvim");
+        mover.pick(Some(&p));
+        let hint = mover.footer(0).unwrap();
+        for key in [
+            "enter below",
+            "alt+h beside",
+            "alt+s swap",
+            "alt+n new window",
+            "esc cancel",
+        ] {
+            assert!(hint.contains(key), "{hint:?} lacks {key:?}");
+        }
+    }
+
+    #[test]
+    fn the_picked_pane_is_marked_in_the_tree() {
+        // Real escapes, so the width check below sees only what is drawn.
+        let colors = Colors {
+            accent: "\x1b[34m".into(),
+            muted: "\x1b[90m".into(),
+            ..Default::default()
+        };
+        let ctx = RenderItemCtx {
+            colors: &colors,
+            active: false,
+            width: 50,
+        };
+        let mover = PaneMover::default();
+        let picked = listed("main:1.0", "%1", "nvim");
+        let other = listed("main:1.1", "%2", "logs");
+        mover.pick(Some(&picked));
+
+        let row = render_item_impl(&pane_item(&picked, "├─ ".into()), &ctx, &mover);
+        assert!(row.contains(&format!("\x1b[34m{PICKED_MARKER}")));
+        assert!(row.contains(PICKED_TAG));
+        // The tag counts toward the row width, so `1.0` still ends the row.
+        assert_eq!(crate::text::display_width(&row), 50);
+
+        let row = render_item_impl(&pane_item(&other, "└─ ".into()), &ctx, &mover);
+        assert!(!row.contains(PICKED_MARKER) && !row.contains(PICKED_TAG));
     }
 
     #[test]

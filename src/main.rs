@@ -130,23 +130,25 @@ enum Outcome {
     /// Run `tmux <cmd>` or `sh -c <cmd>` (the `tmux:` / `shell:` prefixes).
     Dispatch(String),
     /// A resize key: reopen a step bigger (`dir` > 0) or smaller, restoring the
-    /// highlighted row and the search.
+    /// highlighted row, the palette's own key state and the search.
     Resize {
         dir: i64,
         selected: String,
+        state: String,
         query: String,
     },
 }
 
 fn read_outcome(content: String) -> Outcome {
     match content.strip_prefix("resize:") {
-        // `resize:<dir>\n<selected>\n<query>` — the query last, so it may hold
-        // anything but is never split.
+        // `resize:<dir>\n<selected>\n<state>\n<query>` — the query last, so it
+        // may hold anything but is never split.
         Some(rest) => {
-            let mut parts = rest.splitn(3, '\n');
+            let mut parts = rest.splitn(4, '\n');
             Outcome::Resize {
                 dir: parts.next().and_then(|s| s.parse().ok()).unwrap_or(1),
                 selected: parts.next().unwrap_or("").to_string(),
+                state: parts.next().unwrap_or("").to_string(),
                 query: parts.next().unwrap_or("").to_string(),
             }
         }
@@ -185,8 +187,9 @@ fn launcher_mode(name: &str, category: Option<&str>, args: &[String]) {
     let forwarded: String = args.iter().map(|a| shq(a)).collect::<Vec<_>>().join(" ");
 
     let mut size_pct = preview_size();
-    // The highlighted row and search a resize carries into the reopened popup.
-    let (mut selected, mut query) = (String::new(), String::new());
+    // The highlighted row, key state and search a resize carries into the
+    // reopened popup.
+    let (mut selected, mut state, mut query) = (String::new(), String::new(), String::new());
 
     // tmux can't resize an open popup, so a resize key closes it and this loop
     // opens the next one at the new size.
@@ -233,13 +236,15 @@ fn launcher_mode(name: &str, category: Option<&str>, args: &[String]) {
         // Build the inner command: env vars + exec self with the forwarded args.
         let inner = format!(
             "TMUX_PALETTE_CMD={} TMUX_PALETTE_BIN={} TMUX_PALETTE_PADX={} TMUX_PALETTE_BORDERED={} \
-             TMUX_PALETTE_BACK={} TMUX_PALETTE_SELECTED={} TMUX_PALETTE_QUERY={} exec {} {}",
+             TMUX_PALETTE_BACK={} TMUX_PALETTE_SELECTED={} TMUX_PALETTE_STATE={} \
+             TMUX_PALETTE_QUERY={} exec {} {}",
             shq(&cmd_file),
             shq(&self_path),
             m.pad_x,
             if bordered { 1 } else { 0 },
             shq(back),
             shq(&selected),
+            shq(&state),
             shq(&query),
             shq(&self_path),
             forwarded
@@ -261,6 +266,7 @@ fn launcher_mode(name: &str, category: Option<&str>, args: &[String]) {
             Outcome::Resize {
                 dir,
                 selected: sel,
+                state: st,
                 query: q,
             } => {
                 // Step the percents this popup was opened at; with none yet,
@@ -277,7 +283,7 @@ fn launcher_mode(name: &str, category: Option<&str>, args: &[String]) {
                     ])
                     .status();
                 size_pct = Some(next);
-                (selected, query) = (sel, q);
+                (selected, state, query) = (sel, st, q);
             }
             Outcome::Dispatch(content) => break content,
         }
@@ -293,5 +299,30 @@ fn launcher_mode(name: &str, category: Option<&str>, args: &[String]) {
             .status();
     } else if let Some(rest) = content.strip_prefix("shell:") {
         let _ = Command::new("sh").arg("-c").arg(rest).status();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_a_resize_request() {
+        match read_outcome("resize:-1\n3\n%12\nfoo\nbar".to_string()) {
+            Outcome::Resize {
+                dir,
+                selected,
+                state,
+                query,
+            } => {
+                assert_eq!((dir, selected.as_str()), (-1, "3"));
+                assert_eq!((state.as_str(), query.as_str()), ("%12", "foo\nbar"));
+            }
+            Outcome::Dispatch(_) => panic!("expected a resize"),
+        }
+        assert!(matches!(
+            read_outcome("tmux:join-pane".to_string()),
+            Outcome::Dispatch(c) if c == "tmux:join-pane"
+        ));
     }
 }

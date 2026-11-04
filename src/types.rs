@@ -194,6 +194,47 @@ pub type PreviewFn = Rc<dyn Fn(Option<&Item>, &PreviewCtx) -> Vec<String>>;
 /// `colors.panel`.
 pub type DetailsFn = Rc<dyn Fn(Option<&Item>, &PreviewCtx) -> Vec<String>>;
 
+/// What a palette's own key handler made of a keystroke.
+pub enum KeyOutcome {
+    /// Not one of its keys: the runner handles it as usual.
+    Pass,
+    /// Taken; redraw, since the palette's state may have changed.
+    Redraw,
+    /// Taken; empty the search and redraw, keeping the highlighted row — the
+    /// palette moved on to a step that wants a fresh search.
+    ClearSearch,
+    /// Taken: run this action, as choosing a row with it would.
+    Run(Action),
+}
+
+/// Keys a palette handles itself, and the state they drive (Find Pane picks a
+/// pane up and drops it somewhere else). The state lives in the implementor,
+/// behind interior mutability, so the palette's `render_item` and `preview`
+/// closures can share it.
+pub trait KeyHandler {
+    /// Sees each key before the runner does (all but Tab and the resize keys),
+    /// with the highlighted row, `None` when no selectable row is highlighted.
+    /// A row clicked with the mouse arrives as `"\r"`: a click chooses a row
+    /// the way Enter does.
+    fn on_key(&self, key: &str, highlighted: Option<&Item>) -> KeyOutcome;
+    /// A header title to show in place of the palette's own.
+    fn title(&self) -> Option<String> {
+        None
+    }
+    /// Footer text in place of the default hints, given how many rows are
+    /// selectable.
+    fn footer(&self, _selectable: usize) -> Option<String> {
+        None
+    }
+    /// State to carry into the popup a resize key reopens, on one line; `""`
+    /// for none.
+    fn save(&self) -> String {
+        String::new()
+    }
+    /// Take back what [`KeyHandler::save`] returned, in the reopened popup.
+    fn restore(&self, _state: &str) {}
+}
+
 #[derive(Clone)]
 pub struct PaletteDef {
     pub title: Option<String>,
@@ -219,6 +260,8 @@ pub struct PaletteDef {
     /// A strip under the list describing the highlighted item (the command
     /// prompt explains the command), shown when the popup has rows to spare.
     pub details: Option<DetailsFn>,
+    /// Keys the palette handles itself, ahead of the runner's own.
+    pub keys: Option<Rc<dyn KeyHandler>>,
 }
 
 impl Default for PaletteDef {
@@ -236,6 +279,7 @@ impl Default for PaletteDef {
             preview: None,
             chip: None,
             details: None,
+            keys: None,
         }
     }
 }

@@ -19,7 +19,8 @@ use crate::render::{
 };
 use crate::theme::{cursor_tint, make_colors, popup_flags, resolve_active_theme};
 use crate::types::{
-    Action, ActionContext, Colors, Item, PaletteDef, PopupAction, PreviewCtx, RenderItemCtx, Theme,
+    Action, ActionContext, Colors, Item, KeyOutcome, PaletteDef, PopupAction, PreviewCtx,
+    RenderItemCtx, Theme,
 };
 use crate::user_config::{user_aliases, user_shortcuts, user_sizing};
 
@@ -151,6 +152,13 @@ fn resize_dir(key: &str) -> Option<i64> {
     }
 }
 
+/// What a resize key leaves in the command file for the launcher:
+/// `resize:<dir>\n<selected>\n<state>\n<query>`. The query goes last, so it may
+/// hold anything and is never split; `state` is the palette's own, on one line.
+fn resize_request(dir: i64, selected: usize, state: &str, query: &str) -> String {
+    format!("resize:{}\n{}\n{}\n{}", dir, selected, state, query)
+}
+
 fn parse_mouse_event(key: &str) -> Option<(i64, i64, i64, char)> {
     let rest = key.strip_prefix("\x1b[<")?;
     let end = rest.find(['m', 'M'])?;
@@ -253,6 +261,13 @@ impl Runner {
                 None => 0,
             },
         };
+        // ...and whatever state its own keys had built up (see `request_resize`).
+        if let Some(keys) = &def.keys {
+            match std::env::var("TMUX_PALETTE_STATE") {
+                Ok(state) if !state.is_empty() => keys.restore(&state),
+                _ => {}
+            }
+        }
         Runner {
             current_def: def,
             current_name: initial_name.to_string(),
@@ -452,7 +467,12 @@ impl Runner {
             colors.reset
         );
 
-        let header = compose_header(&self.title, width, pad_x, body_width, &colors);
+        let keys = self.current_def.keys.clone();
+        let title = keys
+            .as_ref()
+            .and_then(|k| k.title())
+            .unwrap_or_else(|| self.title.clone());
+        let header = compose_header(&title, width, pad_x, body_width, &colors);
         self.esc_action = Some(EscAction {
             y: if bordered { 1 } else { 2 },
             x_start: header.esc_x1,
@@ -528,8 +548,11 @@ impl Runner {
         };
         self.row_actions = body.row_actions;
 
-        let selectable_count = vis.iter().filter(|i| is_selectable(Some(i))).count() as i64;
-        let footer_text = build_footer_text(selectable_count, &self.empty_text);
+        let selectable_count = vis.iter().filter(|i| is_selectable(Some(i))).count();
+        let footer_text = keys
+            .as_ref()
+            .and_then(|k| k.footer(selectable_count))
+            .unwrap_or_else(|| build_footer_text(selectable_count as i64, &self.empty_text));
 
         let (sel_start, sel_end) = match self.selection_anchor {
             Some(a) if a != self.filter_cursor => (
@@ -677,7 +700,7 @@ impl Runner {
         let query: String = self.filter.iter().collect();
         let _ = std::fs::write(
             file,
-            format!("resize:{}\n{}\n{}", dir, self.selected, query),
+            resize_request(dir, self.selected, &self.saved_state(), &query),
         );
         process::exit(0);
     }
@@ -723,6 +746,57 @@ impl Runner {
             self.navigate_back();
         } else {
             self.exit_now();
+        }
+    }
+
+    /// The palette's key state, kept to one line for the resize request.
+    fn saved_state(&self) -> String {
+        self.current_def
+            .keys
+            .as_ref()
+            .map(|k| k.save().replace(['\n', '\r'], " "))
+            .unwrap_or_default()
+    }
+
+    /// Offer `key` to the palette's own handler first; returns whether it took
+    /// the key (and so the runner should not). Leaves the redraw to the caller.
+    fn palette_key(&mut self, key: &str, vis: &[Item]) -> bool {
+        let Some(keys) = self.current_def.keys.clone() else {
+            return false;
+        };
+        let highlighted = vis.get(self.selected).filter(|i| is_selectable(Some(i)));
+        match keys.on_key(key, highlighted) {
+            KeyOutcome::Pass => return false,
+            KeyOutcome::Redraw => {}
+            KeyOutcome::ClearSearch => {
+                let keep = highlighted.cloned();
+                self.clear_search(keep.as_ref());
+            }
+            KeyOutcome::Run(action) => {
+                self.activate(&Item {
+                    action,
+                    ..Default::default()
+                });
+            }
+        }
+        true
+    }
+
+    /// Empty the search, keeping `keep` highlighted in the full list it brings
+    /// back. Rows are told apart by their `data` payload, which the visible
+    /// list shares with `items` (both clone the same `Rc`).
+    fn clear_search(&mut self, keep: Option<&Item>) {
+        self.set_input("");
+        self.completed = None;
+        let Some(data) = keep.and_then(|i| i.data.clone()) else {
+            return;
+        };
+        if let Some(i) = self
+            .visible()
+            .iter()
+            .position(|v| v.data.as_ref().is_some_and(|d| Rc::ptr_eq(d, &data)))
+        {
+            self.selected = i;
         }
     }
 
@@ -850,13 +924,19 @@ impl Runner {
             return;
         }
         self.selected = hit.item_index;
+        if self.palette_key("\r", vis) {
+            return;
+        }
         let item = item.clone();
         self.activate(&item);
     }
 
     fn handle_mouse_click(&mut self, x: i64, y: i64, vis: &[Item]) {
         if self.esc_clicked(x, y) {
-            self.esc_pressed();
+            // The header's "esc" is the Esc key, so the palette sees it first.
+            if !self.palette_key("\x1b", vis) {
+                self.esc_pressed();
+            }
             return;
         }
         self.handle_row_click(y, vis);
@@ -1140,6 +1220,10 @@ impl Runner {
         }
         // Any other key ends an in-progress Tab-completion cycle.
         self.completion = None;
+        if self.palette_key(key, vis) {
+            self.render();
+            return;
+        }
         if self.handle_enter_or_exit(key, vis) {
             return;
         }
@@ -1401,6 +1485,101 @@ mod tests {
         r.filter_cursor = 0;
         r.handle_edit_key("\x1b[3~");
         assert_eq!(input(&r), "x");
+    }
+
+    /// A palette with keys of its own: Alt+g starts a fresh search, Alt+t sets
+    /// a title from the highlighted row; everything else passes.
+    #[derive(Default)]
+    struct OwnKeys {
+        title: std::cell::RefCell<Option<String>>,
+    }
+
+    impl crate::types::KeyHandler for OwnKeys {
+        fn on_key(&self, key: &str, highlighted: Option<&Item>) -> KeyOutcome {
+            match key {
+                "\x1bg" => KeyOutcome::ClearSearch,
+                "\x1bt" => {
+                    let t = highlighted.map(|i| format!("Picked {}", i.title));
+                    self.title.replace(t);
+                    KeyOutcome::Redraw
+                }
+                _ => KeyOutcome::Pass,
+            }
+        }
+        fn title(&self) -> Option<String> {
+            self.title.borrow().clone()
+        }
+        fn footer(&self, selectable: usize) -> Option<String> {
+            Some(format!("{selectable} rows of mine"))
+        }
+        fn save(&self) -> String {
+            "two\nlines".to_string()
+        }
+    }
+
+    fn own_keys_runner() -> Runner {
+        let row = |title: &str| Item {
+            title: title.to_string(),
+            data: Some(Rc::new(title.to_string())),
+            ..Default::default()
+        };
+        let def = PaletteDef {
+            title: Some("Own".into()),
+            items: crate::types::ItemsSource::Static(vec![row("alpha"), row("beta"), row("gamma")]),
+            keys: Some(Rc::new(OwnKeys::default())),
+            ..Default::default()
+        };
+        Runner::new(def, None, "own")
+    }
+
+    #[test]
+    fn a_palettes_own_keys_come_first_and_the_rest_pass_through() {
+        let mut r = own_keys_runner();
+        let vis = r.visible();
+        assert!(!r.palette_key("b", &vis));
+        assert!(r.palette_key("\x1bt", &vis));
+        assert_eq!(
+            r.current_def.keys.as_ref().unwrap().title().as_deref(),
+            Some("Picked alpha")
+        );
+    }
+
+    #[test]
+    fn clearing_the_search_keeps_the_highlighted_row() {
+        let mut r = own_keys_runner();
+        type_text(&mut r, "gam");
+        let vis = r.visible();
+        assert_eq!((vis.len(), r.selected), (1, 0));
+        assert!(r.palette_key("\x1bg", &vis));
+        assert_eq!(input(&r), "");
+        // `gamma` is still the highlighted row, now third in the full list.
+        assert_eq!(r.selected, 2);
+        assert_eq!(r.visible()[r.selected].title, "gamma");
+    }
+
+    #[test]
+    fn a_palettes_keys_can_set_the_title_and_footer() {
+        let mut r = own_keys_runner();
+        let frame = r.frame();
+        assert!(frame.contains("Own") && frame.contains("3 rows of mine"));
+        let vis = r.visible();
+        r.palette_key("\x1bt", &vis);
+        assert!(r.frame().contains("Picked alpha"));
+    }
+
+    #[test]
+    fn a_resize_carries_the_palettes_state_on_one_line() {
+        let r = own_keys_runner();
+        assert_eq!(r.saved_state(), "two lines");
+        assert_eq!(
+            resize_request(1, 4, &r.saved_state(), "q\nr"),
+            "resize:1\n4\ntwo lines\nq\nr"
+        );
+        // No keys of its own, no state.
+        assert_eq!(
+            Runner::new(PaletteDef::default(), None, "x").saved_state(),
+            ""
+        );
     }
 
     #[test]
