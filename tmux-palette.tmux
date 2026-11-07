@@ -132,3 +132,17 @@ fi
 if [ -n "$COMMAND_PROMPT_KEY" ]; then
   tmux bind-key "$COMMAND_PROMPT_KEY" run-shell "$BIN command-prompt"
 fi
+
+# Find Pane marks a pane whose screen changed since you last saw it. Leaving a
+# pane counts as seeing it, but tmux only reports that with `focus-events on`
+# (without it this hook never fires). Our hook sits at its own index, so hooks
+# of yours on pane-focus-out stay as they are. `@palette-seen-hook off` skips it.
+# Output is dropped: a binary older than this script rejects `mark-seen` (as a
+# palette it doesn't have) without opening anything, and stays quiet doing so.
+# Last, and never fatal, so a tmux that refuses the hook keeps the bindings.
+SEEN_HOOK="$(get_opt @palette-seen-hook 'on')"
+case "$SEEN_HOOK" in
+  off|false|no|0) tmux set-hook -gu 'pane-focus-out[73]' 2>/dev/null || true ;;
+  *) tmux set-hook -g 'pane-focus-out[73]' \
+       "run-shell -b '$BIN mark-seen #{hook_pane} >/dev/null 2>&1 || true'" || true ;;
+esac

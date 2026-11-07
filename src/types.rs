@@ -262,6 +262,11 @@ pub struct PaletteDef {
     pub details: Option<DetailsFn>,
     /// Keys the palette handles itself, ahead of the runner's own.
     pub keys: Option<Rc<dyn KeyHandler>>,
+    /// Runs at the start of every frame, on a keystroke or a live-preview tick,
+    /// so the palette can refresh state its rows draw from (Find Pane re-reads
+    /// which panes changed). It runs often: anything costly must throttle
+    /// itself.
+    pub before_frame: Option<Rc<dyn Fn()>>,
 }
 
 impl Default for PaletteDef {
@@ -280,6 +285,7 @@ impl Default for PaletteDef {
             chip: None,
             details: None,
             keys: None,
+            before_frame: None,
         }
     }
 }
