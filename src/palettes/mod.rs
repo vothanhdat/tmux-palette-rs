@@ -5,4 +5,5 @@ pub mod command_prompt;
 pub mod commands;
 pub mod find_pane;
 pub mod move_pane;
+pub mod pane_changes;
 pub mod themes;

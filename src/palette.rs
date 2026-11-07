@@ -427,6 +427,9 @@ impl Runner {
     /// Lay out the whole popup as one write: header, search, list (and preview),
     /// footer, cursor.
     fn frame(&mut self) -> String {
+        if let Some(before) = self.current_def.before_frame.clone() {
+            before();
+        }
         let (width, height) = terminal_size();
         let vis = self.visible();
         self.ensure_selectable(&vis);

@@ -8,6 +8,11 @@
 //!   * **run** (when `TMUX_PALETTE_CMD` is set, i.e. inside the popup): the
 //!     interactive TUI.
 //!   * **measure** (`--measure`): print popup geometry (kept for parity/testing).
+//!   * **mark seen** (`mark-seen <pane>`): store a pane's screen as seen, so
+//!     Find Pane doesn't mark it changed — the plugin's `pane-focus-out` hook,
+//!     run as you leave a pane. A subcommand, not a flag: a binary too old to
+//!     know it takes it for a palette it doesn't have and exits, rather than
+//!     opening the main palette on every pane switch.
 
 use std::fs;
 use std::process::Command;
@@ -17,6 +22,7 @@ use tmux_palette::cli::{
     resolve_dim, step_pct, with_inline_panes,
 };
 use tmux_palette::palette::run_palette;
+use tmux_palette::palettes::pane_changes::mark_seen_now;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -25,6 +31,12 @@ fn main() {
         .find(|a| !a.starts_with("--"))
         .cloned()
         .unwrap_or_else(|| "commands".to_string());
+    if name == "mark-seen" {
+        if let Some(pane) = args.iter().filter(|a| !a.starts_with("--")).nth(1) {
+            mark_seen_now(pane);
+        }
+        return;
+    }
     let category = args
         .iter()
         .find_map(|a| a.strip_prefix("--category="))

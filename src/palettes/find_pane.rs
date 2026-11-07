@@ -8,11 +8,16 @@
 //! Panes can be moved from here too: Alt+m picks the highlighted pane up, and
 //! the next key drops it relative to whichever pane is highlighted then — see
 //! [`PaneMover`].
+//!
+//! Each pane's row also says whether it shows output you haven't seen (a `•`
+//! by its index, a count on its session) and what an AI agent in it is doing
+//! (`working`, `waiting`) — see [`PaneChanges`].
 
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::pane_changes::{AgentState, PaneChanges, PaneInfo};
 use crate::ansi::{parse_screen, render_row, Cell};
 use crate::fuzzy::multi_fuzzy_score;
 use crate::render::{render_default_item, render_item_styled};
@@ -289,11 +294,7 @@ fn window_subtree(
     items
 }
 
-fn build_items() -> Vec<Item> {
-    let Fetched {
-        panes,
-        current_session,
-    } = fetch_panes();
+fn build_items(panes: Vec<Pane>, current_session: &str) -> Vec<Item> {
     let grouped = group_panes(panes);
 
     let mut items = Vec::new();
@@ -302,7 +303,7 @@ fn build_items() -> Vec<Item> {
             .iter()
             .flat_map(|(_, w)| w.panes.iter().cloned())
             .collect();
-        items.push(session_item(session, &all_in_session, &current_session));
+        items.push(session_item(session, &all_in_session, current_session));
         let win_count = windows.len();
         for (wi, (window_index, w)) in windows.iter().enumerate() {
             items.extend(window_subtree(
@@ -419,6 +420,7 @@ fn clen(s: &str) -> i64 {
 fn render_session(
     session: &str,
     count: usize,
+    changed: usize,
     path: &str,
     is_current: bool,
     colors: &Colors,
@@ -434,6 +436,15 @@ fn render_session(
         colors.accent, colors.bold, session, colors.reset, row_bg
     );
     let count = format!("{} ({}){}{}", colors.muted, count, colors.reset, row_bg);
+    // How many of its panes show output you haven't seen.
+    let changed = if changed == 0 {
+        String::new()
+    } else {
+        format!(
+            "{} · {}{}{}{} new{}{}",
+            colors.muted, colors.reset, row_bg, colors.accent, changed, colors.reset, row_bg
+        )
+    };
     let path = if path.is_empty() {
         String::new()
     } else {
@@ -445,7 +456,7 @@ fn render_session(
             row_bg
         )
     };
-    format!("{}{}{}{}", marker, name, count, path)
+    format!("{}{}{}{}{}", marker, name, count, changed, path)
 }
 
 fn render_window(
@@ -489,6 +500,23 @@ fn pane_marker(p: &Pane, picked: bool, colors: &Colors) -> (String, char) {
 const PICKED_MARKER: char = '◆';
 /// Tag after the picked-up pane's title.
 const PICKED_TAG: &str = "moving";
+/// Beside the index of a pane that shows output you haven't seen.
+const CHANGED_MARK: char = '•';
+/// Tags after an agent's name, by what it's doing (`Done` has none: whether
+/// you've seen what it left is the `•`'s to say).
+const WORKING_TAG: &str = "working";
+const WAITING_TAG: &str = "waiting";
+
+/// What a pane's row says about it besides its name.
+#[derive(Clone, Copy, Default)]
+struct PaneMarks {
+    /// Picked up, to be moved.
+    picked: bool,
+    /// Shows output you haven't seen.
+    changed: bool,
+    /// What the agent in it is doing.
+    state: Option<AgentState>,
+}
 
 fn render_pane(
     p: &Pane,
@@ -496,9 +524,10 @@ fn render_pane(
     colors: &Colors,
     row_bg: &str,
     active: bool,
-    picked: bool,
+    marks: PaneMarks,
     width: i64,
 ) -> String {
+    let picked = marks.picked;
     let (marker_color, marker_char) = pane_marker(p, picked, colors);
     let title_style = if active || picked {
         format!("{}{}", colors.bold, colors.fg)
@@ -529,6 +558,18 @@ fn render_pane(
         left += &format!("  {}{}{}{}", colors.muted, p.agent, colors.reset, row_bg);
         left_plain_w += 2 + clen(&p.agent);
     }
+    // Waiting on you is the one to act on, so it stands out; working doesn't.
+    let state = match marks.state {
+        Some(AgentState::Working) => Some((colors.muted.clone(), WORKING_TAG)),
+        Some(AgentState::Waiting) => {
+            Some((format!("{}{}", colors.accent, colors.bold), WAITING_TAG))
+        }
+        Some(AgentState::Done) | None => None,
+    };
+    if let Some((style, tag)) = state {
+        left += &format!("  {}{}{}{}", style, tag, colors.reset, row_bg);
+        left_plain_w += 2 + clen(tag);
+    }
     if picked {
         left += &format!(
             "  {}{}{}{}{}",
@@ -537,13 +578,21 @@ fn render_pane(
         left_plain_w += 2 + clen(PICKED_TAG);
     }
 
-    let right_text = format!("{}.{}", p.window_index, p.pane_index);
-    let right = format!("{}{}{}{}", colors.muted, right_text, colors.reset, row_bg);
-    let gap = (width - left_plain_w - clen(&right_text)).max(1);
+    let index = format!("{}.{}", p.window_index, p.pane_index);
+    let mut right = format!("{}{}{}{}", colors.muted, index, colors.reset, row_bg);
+    let mut right_plain_w = clen(&index);
+    if marks.changed {
+        right = format!(
+            "{}{}{}{} {}",
+            colors.accent, CHANGED_MARK, colors.reset, row_bg, right
+        );
+        right_plain_w += 2;
+    }
+    let gap = (width - left_plain_w - right_plain_w).max(1);
     format!("{}{}{}", left, " ".repeat(gap as usize), right)
 }
 
-fn render_item_impl(item: &Item, ctx: &RenderItemCtx, mover: &PaneMover) -> String {
+fn render_item_impl(item: &Item, ctx: &RenderItemCtx, state: &FindPane) -> String {
     let colors = ctx.colors;
     let active = ctx.active;
     let row_bg = if active {
@@ -564,21 +613,29 @@ fn render_item_impl(item: &Item, ctx: &RenderItemCtx, mover: &PaneMover) -> Stri
             count,
             path,
             is_current,
-        } => render_session(session, *count, path, *is_current, colors, row_bg),
+        } => render_session(
+            session,
+            *count,
+            state.changes.changed_in(session),
+            path,
+            *is_current,
+            colors,
+            row_bg,
+        ),
         ItemData::Window {
             window_name,
             tree_prefix,
             ..
         } => render_window(window_name, tree_prefix, colors, row_bg, active),
-        ItemData::Pane { pane, tree_prefix } => render_pane(
-            pane,
-            tree_prefix,
-            colors,
-            row_bg,
-            active,
-            mover.is_picked(pane),
-            ctx.width,
-        ),
+        ItemData::Pane { pane, tree_prefix } => {
+            let id = pane_ref(pane);
+            let marks = PaneMarks {
+                picked: state.mover.is_picked(pane),
+                changed: state.changes.changed(id),
+                state: state.changes.state(id),
+            };
+            render_pane(pane, tree_prefix, colors, row_bg, active, marks, ctx.width)
+        }
     }
 }
 
@@ -742,6 +799,65 @@ impl KeyHandler for PaneMover {
     }
 }
 
+// ---- Find Pane's state ---------------------------------------------------------
+
+/// Find Pane's state, shared by its rows, preview and keys: the pane being
+/// moved, and which panes changed since you saw them.
+#[derive(Default)]
+struct FindPane {
+    mover: PaneMover,
+    changes: PaneChanges,
+}
+
+impl KeyHandler for FindPane {
+    fn on_key(&self, key: &str, highlighted: Option<&Item>) -> KeyOutcome {
+        // Any key may move off the previewed pane, or close the popup.
+        self.changes.settle();
+        let outcome = self.mover.on_key(key, highlighted);
+        // Enter (or a click) on a pane jumps there, so it's been seen.
+        if key == "\r" && matches!(outcome, KeyOutcome::Pass) {
+            if let Some(p) = pane_of(highlighted) {
+                self.changes.mark_seen(pane_ref(p));
+            }
+        }
+        outcome
+    }
+
+    fn title(&self) -> Option<String> {
+        self.mover.title()
+    }
+
+    fn footer(&self, selectable: usize) -> Option<String> {
+        self.mover.footer(selectable)
+    }
+
+    fn save(&self) -> String {
+        self.mover.save()
+    }
+
+    fn restore(&self, state: &str) {
+        self.mover.restore(state)
+    }
+}
+
+/// The panes to watch for changes. Those in the window you were looking at
+/// when the palette opened count as seen.
+fn watch_list(panes: &[Pane]) -> Vec<PaneInfo> {
+    let here = panes
+        .iter()
+        .find(|p| p.is_current)
+        .map(|p| (&p.session, &p.window_index));
+    panes
+        .iter()
+        .map(|p| PaneInfo {
+            id: pane_ref(p).to_string(),
+            session: p.session.clone(),
+            agent: p.agent.clone(),
+            on_screen: here == Some((&p.session, &p.window_index)),
+        })
+        .collect()
+}
+
 // ---- preview panel -----------------------------------------------------------
 
 /// Preview lines spent on the pane's identity before its screen starts: target
@@ -888,20 +1004,33 @@ fn initial_selected(items: &[Item]) -> i64 {
 }
 
 pub fn find_pane() -> PaletteDef {
-    let mover = Rc::new(PaneMover::default());
-    let rows = mover.clone();
+    let state = Rc::new(FindPane::default());
+    let (listed, rows, looking, ticking) =
+        (state.clone(), state.clone(), state.clone(), state.clone());
     PaletteDef {
         title: Some("Find Pane".to_string()),
         grouped: Some(false),
         empty_text: Some("No panes".to_string()),
-        items: ItemsSource::Dynamic(Rc::new(build_items)),
+        items: ItemsSource::Dynamic(Rc::new(move || {
+            let Fetched {
+                panes,
+                current_session,
+            } = fetch_panes();
+            listed.changes.track(watch_list(&panes));
+            build_items(panes, &current_session)
+        })),
         render_item: Some(Rc::new(move |item: &Item, ctx: &RenderItemCtx| {
             render_item_impl(item, ctx, &rows)
         })),
         filter: Some(Rc::new(filter_tree)),
         initial_selected: Some(Rc::new(initial_selected)),
-        preview: Some(Rc::new(preview_impl)),
-        keys: Some(mover),
+        preview: Some(Rc::new(move |item: Option<&Item>, ctx: &PreviewCtx| {
+            // The preview's pane is the one you're looking at.
+            looking.changes.viewing(pane_of(item).map(pane_ref));
+            preview_impl(item, ctx)
+        })),
+        before_frame: Some(Rc::new(move || ticking.changes.refresh())),
+        keys: Some(state),
         ..Default::default()
     }
 }
@@ -1259,19 +1388,117 @@ mod tests {
             active: false,
             width: 50,
         };
-        let mover = PaneMover::default();
+        let state = FindPane::default();
         let picked = listed("main:1.0", "%1", "nvim");
         let other = listed("main:1.1", "%2", "logs");
-        mover.pick(Some(&picked));
+        state.mover.pick(Some(&picked));
 
-        let row = render_item_impl(&pane_item(&picked, "├─ ".into()), &ctx, &mover);
+        let row = render_item_impl(&pane_item(&picked, "├─ ".into()), &ctx, &state);
         assert!(row.contains(&format!("\x1b[34m{PICKED_MARKER}")));
         assert!(row.contains(PICKED_TAG));
         // The tag counts toward the row width, so `1.0` still ends the row.
         assert_eq!(crate::text::display_width(&row), 50);
 
-        let row = render_item_impl(&pane_item(&other, "└─ ".into()), &ctx, &mover);
+        let row = render_item_impl(&pane_item(&other, "└─ ".into()), &ctx, &state);
         assert!(!row.contains(PICKED_MARKER) && !row.contains(PICKED_TAG));
+    }
+
+    #[test]
+    fn changed_panes_and_agents_are_marked_in_the_tree() {
+        let colors = Colors {
+            accent: "\x1b[34m".into(),
+            muted: "\x1b[90m".into(),
+            bold: "\x1b[1m".into(),
+            ..Default::default()
+        };
+        let p = listed("main:1.0", "%1", "claude");
+        let row = |marks: PaneMarks| render_pane(&p, "├─ ", &colors, "", false, marks, 50);
+
+        // Unseen output: an accent `•` before the index, which still ends the row.
+        let changed = row(PaneMarks {
+            changed: true,
+            ..Default::default()
+        });
+        assert!(changed.contains(&format!("\x1b[34m{CHANGED_MARK}")));
+        assert!(changed.ends_with("1.0"));
+        assert_eq!(crate::text::display_width(&changed), 50);
+        assert!(!row(PaneMarks::default()).contains(CHANGED_MARK));
+
+        // A working agent says so quietly; one waiting on you stands out.
+        let working = row(PaneMarks {
+            state: Some(AgentState::Working),
+            ..Default::default()
+        });
+        assert!(working.contains(&format!("\x1b[90m{WORKING_TAG}")));
+        let waiting = row(PaneMarks {
+            state: Some(AgentState::Waiting),
+            changed: true,
+            ..Default::default()
+        });
+        assert!(waiting.contains(&format!("\x1b[34m\x1b[1m{WAITING_TAG}")));
+        assert_eq!(crate::text::display_width(&waiting), 50);
+        // Done has no tag: the `•` says whether there's anything to read.
+        let done = row(PaneMarks {
+            state: Some(AgentState::Done),
+            ..Default::default()
+        });
+        assert!(!done.contains(WORKING_TAG) && !done.contains(WAITING_TAG));
+    }
+
+    #[test]
+    fn sessions_count_their_changed_panes() {
+        let colors = Colors {
+            accent: "ACC".into(),
+            ..Default::default()
+        };
+        let row = render_session("main", 4, 2, "/tmp", false, &colors, "");
+        assert!(row.contains("ACC2 new"));
+        let row = render_session("main", 4, 0, "/tmp", false, &colors, "");
+        assert!(!row.contains("new"));
+    }
+
+    #[test]
+    fn the_window_you_were_looking_at_counts_as_seen() {
+        let line = |target: &str, id: &str| {
+            let (session, rest) = target.split_once(':').unwrap();
+            let (window, pane) = rest.split_once('.').unwrap();
+            format!("{session}\t{window}\t{pane}\tw\tt\tclaude\t/p\t0\t0\t{id}")
+        };
+        let panes: Vec<Pane> = [
+            ("main:1.0", "%1"),
+            ("main:1.1", "%2"),
+            ("main:2.0", "%3"),
+            ("work:1.0", "%4"),
+        ]
+        .iter()
+        .map(|(t, id)| parse_pane_line(&line(t, id), "main:1.1").unwrap())
+        .collect();
+        let watched = watch_list(&panes);
+        let on_screen: Vec<&str> = watched
+            .iter()
+            .filter(|w| w.on_screen)
+            .map(|w| w.id.as_str())
+            .collect();
+        // The current pane's window only: not another window, nor another
+        // session's window with the same index.
+        assert_eq!(on_screen, vec!["%1", "%2"]);
+        assert_eq!(watched[3].session, "work");
+        assert_eq!(watched[0].agent, "claude");
+    }
+
+    #[test]
+    fn find_pane_keys_still_move_panes() {
+        let state = FindPane::default();
+        let src = pane_item(&listed("main:1.0", "%1", "nvim"), String::new());
+        // Enter on a pane is still the runner's jump.
+        assert!(matches!(state.on_key("\r", Some(&src)), KeyOutcome::Pass));
+        assert!(matches!(
+            state.on_key(KEY_PICK, Some(&src)),
+            KeyOutcome::ClearSearch
+        ));
+        assert_eq!(state.save(), "%1");
+        assert!(state.title().is_some_and(|t| t.starts_with("Move nvim")));
+        assert!(state.footer(0).is_some_and(|f| f.contains("esc cancel")));
     }
 
     #[test]

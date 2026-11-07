@@ -51,6 +51,12 @@ lives in `~/.config/tmux-palette/*.json`, so local changes survive repo updates.
   or beside another pane, swapped with it, or out into a new window, in any
   session. The live preview keeps working while you choose, so you can look
   before you drop. See [Move a pane](#usage) below.
+- **Unseen output** — *Find Pane* marks a pane whose screen changed since you
+  last looked at it with a `•` beside its index, and counts them on each
+  session's row (`main (4) · 2 new`), so you can see which panes have news
+  without opening each one. Rows of AI agents also say what they're doing:
+  `working`, or `waiting` when one has stopped to ask you something. See
+  [Unseen output and agents](#unseen-output-and-agents) below.
 - **Command prompt** — a drop-in replacement for tmux's `prefix + :`: the
   `command-prompt` palette lets you type any tmux command and run it. Every tmux
   command (pulled live from `tmux list-commands`) is searchable by name and
@@ -228,6 +234,7 @@ set -g @palette-command-prompt-key ':'    # optional, replaces prefix + : (alway
 set -g @palette-prefix 'off'              # optional, 'on' = bind behind the prefix
 set -g @palette-width '60%'               # optional, popup width: percent of the client, or absolute columns
 set -g @palette-preview-size '80%'        # optional, Find Pane size: percent of the client, or '90%x70%'
+set -g @palette-seen-hook 'on'            # optional, 'off' = leaving a pane doesn't count as seeing it
 ```
 
 Then `prefix + I`. TPM clones the default branch (`master`), which ships the
@@ -315,6 +322,66 @@ doesn't move. Moving a window's last pane closes that window, as it does
 in tmux. Resizing the popup with **Alt+= / Alt+-** keeps the pane picked up.
 The *Move Pane to...* palette is still there for sending the current pane to a
 window without opening the tree.
+
+### Unseen output and agents
+
+*Find Pane* marks a pane with `•` beside its index when its screen changed
+since you last saw it, and each session's row counts them (`· 2 new`). The marks
+update live while *Find Pane* is open. A pane counts as seen when:
+
+- it's in the window you were looking at when you opened the palette;
+- its preview has been up for a second (arrowing past it doesn't count);
+- you jump to it with **Enter**;
+- you leave it, if tmux reports that — see below.
+
+What's compared is the pane's screen text, without colors, so a moving cursor
+or highlight is not news. The first time a pane is seen, or when its size
+changes (a resize or zoom redraws it with no new output), it starts over as seen
+rather than marked. The state lives on each pane, in its `@palette-seen` option,
+so it needs no files and disappears with the pane.
+
+**Counting a pane as seen when you leave it.** tmux only reports leaving a pane
+with `focus-events` on, so turn it on, or panes you read without the palette
+still show as changed:
+
+```tmux
+set -g focus-events on
+```
+
+With TPM, the plugin installs the hook for you (`@palette-seen-hook 'off'` skips
+it). Otherwise add it yourself, using your binary's path:
+
+```tmux
+set-hook -g 'pane-focus-out[73]' "run-shell -b '~/.local/bin/tmux-palette mark-seen #{hook_pane} >/dev/null 2>&1 || true'"
+```
+
+**Agents.** A pane running an AI agent (`claude`, `codex`, `aider`, …) shows
+`working` while it works and `waiting` when it has stopped to ask you something,
+such as a permission prompt. While an agent is working, its `•` is held back,
+since its screen changes constantly; once it stops, the `•` tells you whether
+there's anything you haven't read. The state comes from the agent's own hooks,
+which set the pane's `@palette-agent-state` option to `working`, `waiting` or
+`done`. For Claude Code, add this to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "tmux set -p -t \"$TMUX_PANE\" @palette-agent-state working 2>/dev/null || true" }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "tmux set -p -t \"$TMUX_PANE\" @palette-agent-state working 2>/dev/null || true" }] }],
+    "Notification": [{ "matcher": "permission_prompt|elicitation_dialog", "hooks": [{ "type": "command", "command": "tmux set -p -t \"$TMUX_PANE\" @palette-agent-state waiting 2>/dev/null || true" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "tmux set -p -t \"$TMUX_PANE\" @palette-agent-state done 2>/dev/null || true" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "tmux set -pu -t \"$TMUX_PANE\" @palette-agent-state 2>/dev/null || true" }] }]
+  }
+}
+```
+
+`PostToolUse` puts it back to `working` once you answer a permission prompt.
+Without the hooks, a Claude Code pane still shows `working` while its status
+line reads "esc to interrupt", but `waiting` needs the hooks. Claude Code keeps
+its window title fixed inside tmux, so the title can't say either. Other agents
+can set the same option from their own hooks. The state only shows on panes
+recognized as running an agent, so a state left behind by an agent that
+crashed doesn't stick to the shell that replaced it.
 
 ## How it works (the trick)
 
